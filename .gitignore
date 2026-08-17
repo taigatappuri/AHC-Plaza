@@ -1,0 +1,11 @@
+/example/
+/ahc-plaza
+/ahc-plaza-*
+/coverage.out
+/web/dist/
+/web/node_modules/
+/dist/
+.DS_Store
+.idea/
+.vscode/
+/.agents/

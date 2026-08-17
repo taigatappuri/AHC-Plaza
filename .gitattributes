@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+*.woff binary
+*.woff2 binary
+internal/server/static/assets/*.js -whitespace

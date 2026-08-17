@@ -1,0 +1,25 @@
+[project]
+problem = "ahc000"
+objective = "max"
+
+[paths]
+solver_dir = "solver"
+tools_dir = "tools"
+
+[execution]
+default_input_dir = "ahc-plaza/inputs"
+threads = 0
+timeout_seconds = 300
+
+[pahcer]
+setting_file = "pahcer_config.toml"
+
+[score]
+invalid_score = 0.0
+include_invalid_cases = true
+
+[statistics]
+confidence_level = 0.95
+bootstrap_iterations = 10000
+
+[input_format]
