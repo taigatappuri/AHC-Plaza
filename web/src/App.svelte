@@ -71,7 +71,7 @@
   let showingRunDetail = false
 
   const tabs: TabDefinition[] = [
-    { id: 'overview', label: '実行', hint: 'Runを開始' },
+    { id: 'overview', label: '実行', hint: '実行を開始' },
     { id: 'detail', label: '履歴', hint: 'Runの履歴を確認' },
     { id: 'compare', label: '比較', hint: 'Runを比較' },
     { id: 'input', label: '入力', hint: '入力ケースを生成' },
@@ -80,7 +80,7 @@
 
   $: currentPageTitle = ({
     overview: '実行',
-    detail: showingRunDetail ? 'Run詳細' : '履歴',
+    detail: showingRunDetail ? '実行の詳細' : '履歴',
     compare: '比較',
     input: '入力生成',
     settings: '設定'
@@ -345,7 +345,7 @@
     onNavigate={(tab) => { activeTab = tab; if (tab === 'detail') showingRunDetail = false }}
   />
 
-  <main class="main-content" class:focused-page={activeTab === 'input' || activeTab === 'settings'}>
+  <main class="main-content">
     <header class="page-heading">
       <h1>{currentPageTitle}</h1>
       {#if activeTab === 'compare' || (activeTab === 'detail' && !showingRunDetail)}
@@ -353,27 +353,29 @@
       {/if}
     </header>
 
-    {#if message}<div class="notice">{message}</div>{/if}
+    <div>
+      {#if message}<div class="notice">{message}</div>{/if}
 
-    {#if activeTab === 'overview'}
-      <RunCommand bind:solver {solvers} {solverLoading} {solverError} onRefreshSolvers={loadSolvers} {inputDirectories} inputRoot={configData?.execution.default_input_dir ?? 'ahc-plaza/inputs'} {inputDirectoryLoading} {inputDirectoryError} onRefreshInputDirectories={loadInputDirectories} bind:inputDir bind:threads bind:timeoutSeconds bind:comment {loading} defaultsAvailable={configData !== null} onResetDefaults={resetRunDefaults} onSubmit={startRun} />
-      <section class="recent-runs">
-        <header class="section-heading"><h2>直近の実行履歴</h2><button class="context-action" type="button" onclick={refreshRuns} disabled={runsRefreshing}>{runsRefreshing ? '更新中…' : '更新'}</button></header>
-        <RunTable runs={runs.slice(0, 5)} selectedRunId={selectedRun?.id ?? ''} compact onSelect={openRunDetail} />
-      </section>
+      {#if activeTab === 'overview'}
+        <RunCommand bind:solver {solvers} {solverLoading} {solverError} onRefreshSolvers={loadSolvers} {inputDirectories} inputRoot={configData?.execution.default_input_dir ?? 'ahc-plaza/inputs'} {inputDirectoryLoading} {inputDirectoryError} onRefreshInputDirectories={loadInputDirectories} bind:inputDir bind:threads bind:timeoutSeconds bind:comment {loading} defaultsAvailable={configData !== null} onResetDefaults={resetRunDefaults} onSubmit={startRun} />
+        <section class="recent-runs">
+          <header class="section-heading"><h2>直近の実行履歴</h2><button class="context-action" type="button" onclick={refreshRuns} disabled={runsRefreshing}>{runsRefreshing ? '更新中…' : '更新'}</button></header>
+          <RunTable runs={runs.slice(0, 5)} selectedRunId={selectedRun?.id ?? ''} compact onSelect={openRunDetail} />
+        </section>
 
-    {:else if activeTab === 'input'}
-      <InputCreatePage generators={inputGenerators} {inputGeneratorLoading} error={inputGeneratorError} result={inputGenerationResult} defaultOutputDir={configData?.execution.default_input_dir ?? 'ahc-plaza/inputs'} loading={inputGenerating} onGenerate={generateInputCases} />
-    {:else if activeTab === 'detail'}
-      {#if showingRunDetail}
-        <RunDetail {selectedRun} {caseResults} {runStatistics} {featureData} {source} {logs} {runError} onCancel={cancelRun} onBack={() => showingRunDetail = false} onUpdateComment={updateRunComment} onConfigureInputFormat={configureInputFormat} />
+      {:else if activeTab === 'input'}
+        <InputCreatePage generators={inputGenerators} {inputGeneratorLoading} error={inputGeneratorError} result={inputGenerationResult} defaultOutputDir={configData?.execution.default_input_dir ?? 'ahc-plaza/inputs'} loading={inputGenerating} onGenerate={generateInputCases} />
+      {:else if activeTab === 'detail'}
+        {#if showingRunDetail}
+          <RunDetail {selectedRun} {caseResults} {runStatistics} {featureData} {source} {logs} {runError} onCancel={cancelRun} onBack={() => showingRunDetail = false} onUpdateComment={updateRunComment} onConfigureInputFormat={configureInputFormat} />
+        {:else}
+          <RunTable bind:query={runQuery} {runs} selectedRunId={selectedRun?.id ?? ''} onSelect={openRunDetail} />
+        {/if}
+      {:else if activeTab === 'compare'}
+        <ComparePage bind:compareA bind:compareB {runs} {comparison} features={analysisFeatures} objective={configData?.project.objective ?? 'max'} loading={comparing} onCompare={compareRuns} onInvalidate={() => comparison = null} onConfigureInputFormat={configureInputFormat} />
       {:else}
-        <RunTable bind:query={runQuery} {runs} selectedRunId={selectedRun?.id ?? ''} onSelect={openRunDetail} />
+        <SettingsPage {configData} onSave={saveConfig} />
       {/if}
-    {:else if activeTab === 'compare'}
-      <ComparePage bind:compareA bind:compareB {runs} {comparison} features={analysisFeatures} objective={configData?.project.objective ?? 'max'} loading={comparing} onCompare={compareRuns} onInvalidate={() => comparison = null} onConfigureInputFormat={configureInputFormat} />
-    {:else}
-      <SettingsPage {configData} onSave={saveConfig} />
-    {/if}
+    </div>
   </main>
 </div>

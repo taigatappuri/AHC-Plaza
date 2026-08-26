@@ -143,7 +143,6 @@
         <div class="form-grid">
           <label>無効スコア<input type="number" step="any" bind:value={form.score.invalid_score} class:invalid={validationErrors['score.invalid_score']} /></label>
           <label>信頼水準<input type="number" min="0.01" max="0.99" step="0.01" bind:value={form.statistics.confidence_level} class:invalid={validationErrors['statistics.confidence_level']} /></label>
-          <label>ブートストラップ回数<input type="number" min="1" bind:value={form.statistics.bootstrap_iterations} class:invalid={validationErrors['statistics.bootstrap_iterations']} /></label>
           <label class="checkbox"><input type="checkbox" bind:checked={form.score.include_invalid_cases} />無効ケースを含める</label>
         </div>
       </div>
