@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/taigatappuri/AHC-Plaza/internal/domain"
@@ -18,13 +19,13 @@ func TestExecuteRunCreatesSnapshotAndPersistsSuccess(t *testing.T) {
 	fakePahcer := filepath.Join(root, "fake-pahcer")
 
 	summary, err := ExecuteRun(context.Background(), RunRequest{
-		ConfigPath:     filepath.Join(root, "ahc-plaza.toml"),
-		Solver:         "solver/hoge.cpp",
-		InputDir:       "ahc-plaza/inputs/cases",
-		Threads:        1,
-		TimeoutSeconds: 2,
-		PahcerBinary:   fakePahcer,
-		SettingFile:    "pahcer_config.toml",
+		ConfigPath:          filepath.Join(root, "ahc-plaza.toml"),
+		Solver:              "solver/hoge.cpp",
+		InputDir:            "ahc-plaza/inputs/cases",
+		Threads:             1,
+		TimeoutMilliseconds: 25,
+		PahcerBinary:        fakePahcer,
+		SettingFile:         "pahcer_config.toml",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,18 +47,25 @@ func TestExecuteRunCreatesSnapshotAndPersistsSuccess(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "ahc-plaza", "ahc-plaza.db")); err != nil {
 		t.Fatal(err)
 	}
+	workspaceConfig, err := os.ReadFile(filepath.Join(root, "ahc-plaza", "runs", summary.RunID, "workspace", "pahcer_config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(workspaceConfig), `"case-exec", "--timeout-ms", "25", "--", "solver"`) {
+		t.Fatalf("ケース単位のタイムアウト設定がありません: %s", workspaceConfig)
+	}
 }
 
 func TestExecuteRunPersistsFailure(t *testing.T) {
 	root := newTestProject(t, "exit 7")
 	summary, err := ExecuteRun(context.Background(), RunRequest{
-		ConfigPath:     filepath.Join(root, "ahc-plaza.toml"),
-		Solver:         "solver/hoge.cpp",
-		InputDir:       "ahc-plaza/inputs/cases",
-		Threads:        1,
-		TimeoutSeconds: 2,
-		PahcerBinary:   filepath.Join(root, "fake-pahcer"),
-		SettingFile:    "pahcer_config.toml",
+		ConfigPath:          filepath.Join(root, "ahc-plaza.toml"),
+		Solver:              "solver/hoge.cpp",
+		InputDir:            "ahc-plaza/inputs/cases",
+		Threads:             1,
+		TimeoutMilliseconds: 25,
+		PahcerBinary:        filepath.Join(root, "fake-pahcer"),
+		SettingFile:         "pahcer_config.toml",
 	})
 	if err == nil {
 		t.Fatal("失敗したpahcerを成功扱いにしました")
@@ -86,7 +94,7 @@ tools_dir = "tools"
 [execution]
 default_input_dir = "ahc-plaza/inputs"
 threads = 1
-timeout_seconds = 2
+timeout_ms = 2000
 
 [pahcer]
 setting_file = "pahcer_config.toml"

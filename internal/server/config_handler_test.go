@@ -19,7 +19,7 @@ func TestConfigAPIUpdatesAHCPlazaTOML(t *testing.T) {
 	body := `{
 		"project":{"problem":"demo-next","objective":"min"},
 		"paths":{"solver_dir":"src","tools_dir":"tester"},
-		"execution":{"default_input_dir":"tester/in","threads":4,"timeout_seconds":20},
+		"execution":{"default_input_dir":"tester/in","threads":4,"timeout_ms":20000},
 		"pahcer":{"setting_file":"tester/pahcer.toml"},
 		"score":{"invalid_score":-1,"include_invalid_cases":false},
 		"statistics":{"confidence_level":0.99,"bootstrap_iterations":20000},
@@ -75,7 +75,7 @@ func TestConfigAPIRejectsInvalidUpdateWithoutReplacingFile(t *testing.T) {
 	body := `{
 		"project":{"problem":"demo","objective":"max"},
 		"paths":{"solver_dir":"../outside","tools_dir":"tools"},
-		"execution":{"default_input_dir":"ahc-plaza/inputs","threads":0,"timeout_seconds":10},
+		"execution":{"default_input_dir":"ahc-plaza/inputs","threads":0,"timeout_ms":10000},
 		"pahcer":{"setting_file":"pahcer_config.toml"},
 		"score":{"invalid_score":0,"include_invalid_cases":true},
 		"statistics":{"confidence_level":0.95,"bootstrap_iterations":10000}

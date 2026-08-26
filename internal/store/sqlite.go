@@ -55,11 +55,11 @@ func (s *SQLiteStore) SaveRun(ctx context.Context, run domain.Run) error {
 	INSERT INTO runs (
   id, run_number, problem, objective, solver_path, input_dir, input_cases_hash,
   source_path, source_hash, config_hash, pahcer_version, compiler_version,
-  threads, timeout_seconds, status, comment, created_at, started_at, finished_at
+  threads, timeout_ms, status, comment, created_at, started_at, finished_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `, run.ID, runNumber, run.Problem, run.Objective, run.SolverPath, run.InputDir, run.InputCasesHash,
 			run.SourcePath, run.SourceHash, run.ConfigHash, run.PahcerVersion, run.CompilerVersion,
-			run.Threads, run.TimeoutSeconds, string(run.Status), run.Comment,
+			run.Threads, run.TimeoutMilliseconds, string(run.Status), run.Comment,
 			formatTime(run.CreatedAt), formatTime(run.StartedAt), formatOptionalTime(run.FinishedAt))
 		return err
 	})
@@ -68,7 +68,7 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (domain.Run, error)
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, run_number, problem, objective, solver_path, input_dir, input_cases_hash,
        source_path, source_hash, config_hash, pahcer_version, compiler_version,
-       threads, timeout_seconds, status, comment, created_at, started_at, finished_at
+       threads, timeout_ms, status, comment, created_at, started_at, finished_at
 FROM runs WHERE id = ?
 `, id)
 	var run domain.Run
@@ -176,7 +176,7 @@ func (s *SQLiteStore) ListRunSummaries(ctx context.Context, limit int) ([]domain
 	rows, err := s.db.QueryContext(ctx, `
 	SELECT r.id, r.run_number, r.problem, r.objective, r.solver_path, r.input_dir, r.input_cases_hash,
 	       r.source_path, r.source_hash, r.config_hash, r.pahcer_version, r.compiler_version,
-       r.threads, r.timeout_seconds, r.status, r.comment, r.created_at, r.started_at, r.finished_at,
+       r.threads, r.timeout_ms, r.status, r.comment, r.created_at, r.started_at, r.finished_at,
        c.input_case_id, c.score, c.execution_time_ns
 FROM (
   SELECT * FROM runs ORDER BY run_number DESC, id LIMIT ?

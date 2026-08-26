@@ -42,8 +42,8 @@ export function validateConfig(value: ConfigData) {
   if (!Number.isInteger(value.execution.threads) || value.execution.threads < 0) {
     errors['execution.threads'] = '0以上の整数を入力'
   }
-  if (!Number.isInteger(value.execution.timeout_seconds) || value.execution.timeout_seconds < 1) {
-    errors['execution.timeout_seconds'] = '1以上の整数を入力'
+  if (!Number.isInteger(value.execution.timeout_ms) || value.execution.timeout_ms < 1) {
+    errors['execution.timeout_ms'] = '1以上の整数を入力'
   }
   if (!Number.isFinite(value.score.invalid_score)) errors['score.invalid_score'] = '数値を入力'
   if (!(value.statistics.confidence_level > 0 && value.statistics.confidence_level < 1)) {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { filterCaseResultsByFeatures } from '../lib/feature-filter'
   import { formatDuration, formatScore, statusLabel } from '../lib/formatters'
   import type { CaseResult, InputFeatureDefinition, FeatureConditionOperator, FeatureData } from '../lib/types'
 
@@ -8,6 +9,7 @@
   export let featureData: FeatureData | null = null
   export let onSelectCase: (caseID: string) => void | Promise<void> = () => {}
   export let onConfigureInputFormat: () => void = () => {}
+  export let onFilteredCaseResultsChange: (caseResults: CaseResult[] | null) => void = () => {}
 
   const operators: FeatureConditionOperator[] = ['<', '<=', '=', '!=', '>=', '>']
   let conditions: Condition[] = []
@@ -17,14 +19,6 @@
   const label = (feature: InputFeatureDefinition) => feature.kind === 'cpp' ? `${feature.name} · C++` : `${feature.name} · ${feature.line}:${feature.column}`
   const ready = (condition: Condition): condition is Condition & { value: number } =>
     typeof condition.value === 'number' && Number.isFinite(condition.value)
-  const matches = (value: number, condition: Condition & { value: number }) => ({
-    '<': value < condition.value,
-    '<=': value <= condition.value,
-    '=': value === condition.value,
-    '!=': value !== condition.value,
-    '>=': value >= condition.value,
-    '>': value > condition.value
-  })[condition.operator]
   const formatValue = (value?: number) => value == null ? '—' : value.toLocaleString('ja-JP', { maximumFractionDigits: 6 })
 
   function addCondition() {
@@ -51,10 +45,10 @@
   $: readyConditions = conditions.filter(ready)
   $: analysisReady = conditions.length > 0 && readyConditions.length === conditions.length
   $: valuesByCase = new Map((featureData?.cases ?? []).map((item) => [item.input_case_id, item.values]))
-  $: matched = analysisReady ? caseResults.filter((result) => readyConditions.every((condition) => {
-    const value = valuesByCase.get(result.input_case_id)?.[condition.feature]
-    return Number.isFinite(value) && matches(value!, condition)
-  })) : []
+  $: matched = analysisReady
+    ? filterCaseResultsByFeatures(caseResults, featureData?.cases ?? [], readyConditions)
+    : []
+  $: onFilteredCaseResultsChange(analysisReady ? matched : null)
   $: scores = matched.map((result) => result.score).filter(Number.isFinite)
   $: mean = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : undefined
   $: selectedFeatures = [...new Set(readyConditions.map((condition) => condition.feature))]

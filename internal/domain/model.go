@@ -14,25 +14,25 @@ const (
 )
 
 type Run struct {
-	ID              string     `json:"id"`
-	RunNumber       int        `json:"run_number"`
-	Problem         string     `json:"problem"`
-	Objective       string     `json:"objective"`
-	SolverPath      string     `json:"solver_path"`
-	InputDir        string     `json:"input_dir"`
-	InputCasesHash  string     `json:"input_cases_hash"`
-	SourcePath      string     `json:"source_path"`
-	SourceHash      string     `json:"source_hash"`
-	ConfigHash      string     `json:"config_hash"`
-	PahcerVersion   string     `json:"pahcer_version"`
-	CompilerVersion string     `json:"compiler_version"`
-	Threads         int        `json:"threads"`
-	TimeoutSeconds  int        `json:"timeout_seconds"`
-	Status          RunStatus  `json:"status"`
-	Comment         string     `json:"comment"`
-	StartedAt       time.Time  `json:"started_at"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID                  string     `json:"id"`
+	RunNumber           int        `json:"run_number"`
+	Problem             string     `json:"problem"`
+	Objective           string     `json:"objective"`
+	SolverPath          string     `json:"solver_path"`
+	InputDir            string     `json:"input_dir"`
+	InputCasesHash      string     `json:"input_cases_hash"`
+	SourcePath          string     `json:"source_path"`
+	SourceHash          string     `json:"source_hash"`
+	ConfigHash          string     `json:"config_hash"`
+	PahcerVersion       string     `json:"pahcer_version"`
+	CompilerVersion     string     `json:"compiler_version"`
+	Threads             int        `json:"threads"`
+	TimeoutMilliseconds int        `json:"timeout_ms"`
+	Status              RunStatus  `json:"status"`
+	Comment             string     `json:"comment"`
+	StartedAt           time.Time  `json:"started_at"`
+	FinishedAt          *time.Time `json:"finished_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
 }
 
 type InputCase struct {

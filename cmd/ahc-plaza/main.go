@@ -54,6 +54,8 @@ func execute(args []string) error {
 	}
 
 	switch args[0] {
+	case "case-exec":
+		return executeCase(args[1:])
 	case "init":
 		return executeInit(args[1:])
 	case "doctor":
@@ -214,7 +216,7 @@ func executeRun(args []string) error {
 	solver := flags.String("solver", "", "C++ solver file to run")
 	inputDir := flags.String("input-dir", "", "input case directory")
 	threads := flags.Int("threads", -1, "number of parallel workers")
-	timeout := flags.Int("timeout", 0, "timeout in seconds")
+	timeout := flags.Int("timeout-ms", 0, "per-case timeout in milliseconds")
 	comment := flags.String("comment", "", "comment for this run")
 	configPath := flags.String("config", "ahc-plaza.toml", "configuration file")
 	pahcerBinary := flags.String("pahcer", "", "pahcer executable")
@@ -228,14 +230,14 @@ func executeRun(args []string) error {
 	}
 
 	summary, err := usecase.ExecuteRun(context.Background(), usecase.RunRequest{
-		ConfigPath:     *configPath,
-		Solver:         *solver,
-		InputDir:       *inputDir,
-		Threads:        *threads,
-		TimeoutSeconds: *timeout,
-		Comment:        *comment,
-		PahcerBinary:   *pahcerBinary,
-		SettingFile:    *settingFile,
+		ConfigPath:          *configPath,
+		Solver:              *solver,
+		InputDir:            *inputDir,
+		Threads:             *threads,
+		TimeoutMilliseconds: *timeout,
+		Comment:             *comment,
+		PahcerBinary:        *pahcerBinary,
+		SettingFile:         *settingFile,
 	})
 	if *jsonOutput {
 		if encodeErr := json.NewEncoder(os.Stdout).Encode(summary); encodeErr != nil {

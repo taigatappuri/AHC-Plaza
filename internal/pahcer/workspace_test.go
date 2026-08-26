@@ -22,6 +22,7 @@ threads = 0
 
 [[test_steps]]
 program = "solver"
+args = ["--mode", "fast"]
 stdin = "tools/in/{SEED}.txt"
 measure_time = true
 `
@@ -43,7 +44,7 @@ measure_time = true
 
 	workspace, err := PrepareWorkspace(filepath.Join(root, "run"), source, filepath.Join(root, "tools"), filepath.Join(root, "pahcer_config.toml"), []domain.InputCase{{
 		ID: "case-a.txt", Path: inputPath, SHA256: "hash", Size: 6,
-	}}, 4)
+	}}, WorkspaceOptions{Threads: 4, CaseTimeoutMilliseconds: 75, CaseRunner: "/opt/ahc-plaza"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +71,10 @@ measure_time = true
 	if !strings.Contains(string(configured), "end_seed = 1") {
 		t.Fatalf("end_seed was not rewritten: %s", configured)
 	}
+	if !strings.Contains(string(configured), `program = "/opt/ahc-plaza"`) ||
+		!strings.Contains(string(configured), `args = ["case-exec", "--timeout-ms", "75", "--", "solver", "--mode", "fast"]`) {
+		t.Fatalf("case timeout was not configured: %s", configured)
+	}
 }
 
 func TestPrepareWorkspaceAcceptsExamplePahcerConfig(t *testing.T) {
@@ -91,7 +96,7 @@ func TestPrepareWorkspaceAcceptsExamplePahcerConfig(t *testing.T) {
 		filepath.Join(projectRoot, "tools"),
 		filepath.Join(projectRoot, "pahcer_config.toml"),
 		inputCases,
-		1,
+		WorkspaceOptions{Threads: 1, CaseTimeoutMilliseconds: 2000, CaseRunner: "/opt/ahc-plaza"},
 	)
 	if err != nil {
 		t.Fatal(err)

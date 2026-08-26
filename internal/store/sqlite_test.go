@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,60 @@ import (
 
 	"github.com/taigatappuri/AHC-Plaza/internal/domain"
 )
+
+func TestSQLiteStoreMigratesLegacyTimeoutSeconds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ahc-plaza.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`CREATE TABLE runs (
+  id TEXT PRIMARY KEY,
+  run_number INTEGER,
+  problem TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  solver_path TEXT NOT NULL,
+  input_dir TEXT NOT NULL,
+  input_cases_hash TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  pahcer_version TEXT NOT NULL,
+  compiler_version TEXT NOT NULL,
+  threads INTEGER NOT NULL,
+  timeout_seconds INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  comment TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT
+);
+INSERT INTO runs VALUES (
+  'legacy', 1, 'ahc000', 'max', 'solver/main.cpp', 'ahc-plaza/inputs/cases', 'cases',
+  'source.cpp', 'source', 'config', 'pahcer', 'g++', 1, 2, 'succeeded', '',
+  '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z'
+)`)
+	if err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	run, err := store.GetRun(context.Background(), "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.TimeoutMilliseconds != 2000 {
+		t.Fatalf("timeout = %d, want 2000", run.TimeoutMilliseconds)
+	}
+}
 
 func TestSQLiteStoreSavesAndLoadsRun(t *testing.T) {
 	store, err := OpenSQLite(filepath.Join(t.TempDir(), "ahc-plaza", "ahc-plaza.db"))
@@ -19,23 +74,23 @@ func TestSQLiteStoreSavesAndLoadsRun(t *testing.T) {
 
 	createdAt := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
 	run := domain.Run{
-		ID:              "run-1",
-		Problem:         "ahc000",
-		Objective:       "max",
-		SolverPath:      "solver/hoge.cpp",
-		InputDir:        "ahc-plaza/inputs/cases",
-		InputCasesHash:  "cases-hash",
-		SourcePath:      "ahc-plaza/runs/run-1/source/hoge.cpp",
-		SourceHash:      "source-hash",
-		ConfigHash:      "config-hash",
-		PahcerVersion:   "0.1.0",
-		CompilerVersion: "gcc 14",
-		Threads:         4,
-		TimeoutSeconds:  10,
-		Status:          domain.RunQueued,
-		Comment:         "test",
-		CreatedAt:       createdAt,
-		StartedAt:       createdAt,
+		ID:                  "run-1",
+		Problem:             "ahc000",
+		Objective:           "max",
+		SolverPath:          "solver/hoge.cpp",
+		InputDir:            "ahc-plaza/inputs/cases",
+		InputCasesHash:      "cases-hash",
+		SourcePath:          "ahc-plaza/runs/run-1/source/hoge.cpp",
+		SourceHash:          "source-hash",
+		ConfigHash:          "config-hash",
+		PahcerVersion:       "0.1.0",
+		CompilerVersion:     "gcc 14",
+		Threads:             4,
+		TimeoutMilliseconds: 10000,
+		Status:              domain.RunQueued,
+		Comment:             "test",
+		CreatedAt:           createdAt,
+		StartedAt:           createdAt,
 	}
 	if err := store.SaveRun(context.Background(), run); err != nil {
 		t.Fatal(err)

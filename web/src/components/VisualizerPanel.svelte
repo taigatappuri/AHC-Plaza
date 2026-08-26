@@ -6,6 +6,8 @@
   export let selectedRun: Run | null = null
   export let caseResults: CaseResult[] = []
   export let selectedCaseID = ''
+  export let title = 'ビジュアライザ'
+  export let comparisonMode = false
 
   let visualizerReady = false
   let entry = ''
@@ -225,11 +227,11 @@
 
 <section class="panel visualizer-panel">
   <div class="panel-header visualizer-header">
-    <h2>ビジュアライザ</h2>
+    <h2>{title}</h2>
     {#if visualizerReady}
       <div class="visualizer-actions">
         <span class="visualizer-entry">{entry}</span>
-        <button class="text-action" type="button" onclick={deleteVisualizer} disabled={deleting}>{deleting ? '削除中…' : '削除'}</button>
+        {#if !comparisonMode}<button class="text-action" type="button" onclick={deleteVisualizer} disabled={deleting}>{deleting ? '削除中…' : '削除'}</button>{/if}
       </div>
     {/if}
   </div>
@@ -239,28 +241,34 @@
 
   {#if !visualizerReady}
     <div class="visualizer-setup">
-      <div>
-        <strong>公式ビジュアライザ</strong>
-      </div>
-      <div class="visualizer-download-form">
-        <input bind:value={visualizerURL} placeholder="https://img.atcoder.jp/ahc000/visualizer.html" aria-label="ビジュアライザURL" />
-        <button class="primary-action" type="button" onclick={downloadVisualizer} disabled={downloading}>{downloading ? '取得中…' : '取得'}</button>
-      </div>
+      {#if comparisonMode}
+        <strong>公式ビジュアライザが未設定です</strong>
+      {:else}
+        <div>
+          <strong>公式ビジュアライザ</strong>
+        </div>
+        <div class="visualizer-download-form">
+          <input bind:value={visualizerURL} placeholder="https://img.atcoder.jp/ahc000/visualizer.html" aria-label="ビジュアライザURL" />
+          <button class="primary-action" type="button" onclick={downloadVisualizer} disabled={downloading}>{downloading ? '取得中…' : '取得'}</button>
+        </div>
+      {/if}
     </div>
   {:else}
     <div class="visualizer-toolbar">
-      <label>
-        <span class="field-label">ケース</span>
-        <select value={selectedCaseID} onchange={handleCaseChange} disabled={caseResults.length === 0}>
-          {#if caseResults.length === 0}
-            <option value="">ケースなし · seed 0</option>
-          {:else}
-            {#each caseResults as item}
-              <option value={item.input_case_id}>{item.input_case_id} · seed {item.seed}</option>
-            {/each}
-          {/if}
-        </select>
-      </label>
+      {#if !comparisonMode}
+        <label>
+          <span class="field-label">ケース</span>
+          <select value={selectedCaseID} onchange={handleCaseChange} disabled={caseResults.length === 0}>
+            {#if caseResults.length === 0}
+              <option value="">ケースなし · seed 0</option>
+            {:else}
+              {#each caseResults as item}
+                <option value={item.input_case_id}>{item.input_case_id} · seed {item.seed}</option>
+              {/each}
+            {/if}
+          </select>
+        </label>
+      {/if}
       <div class="visualizer-meta"><span>seed</span><strong>{selectedSeed}</strong></div>
       <label class="visualizer-scale">
         <span class="field-label">倍率</span>

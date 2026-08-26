@@ -17,7 +17,7 @@ func scanRunColumns(row rowScanner, run *domain.Run, extra ...interface{}) error
 	args := []interface{}{
 		&run.ID, &run.RunNumber, &run.Problem, &run.Objective, &run.SolverPath, &run.InputDir, &run.InputCasesHash,
 		&run.SourcePath, &run.SourceHash, &run.ConfigHash, &run.PahcerVersion, &run.CompilerVersion,
-		&run.Threads, &run.TimeoutSeconds, &status, &run.Comment,
+		&run.Threads, &run.TimeoutMilliseconds, &status, &run.Comment,
 		&createdAt, &startedAt, &finishedAt,
 	}
 	args = append(args, extra...)

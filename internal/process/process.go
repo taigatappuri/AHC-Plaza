@@ -41,8 +41,8 @@ func Run(ctx context.Context, request Request) (Result, error) {
 	if len(request.Command) == 0 {
 		return Result{}, errors.New("execution command is empty")
 	}
-	if request.Timeout <= 0 {
-		return Result{}, errors.New("timeout must be at least 1 second")
+	if request.Timeout < 0 {
+		return Result{}, errors.New("timeout must not be negative")
 	}
 	if request.StdoutPath == "" || request.StderrPath == "" {
 		return Result{}, errors.New("stdout and stderr destinations are required")
@@ -65,7 +65,11 @@ func Run(ctx context.Context, request Request) (Result, error) {
 	}
 	defer stderr.Close()
 
-	runContext, cancel := context.WithTimeout(ctx, request.Timeout)
+	runContext := ctx
+	cancel := func() {}
+	if request.Timeout > 0 {
+		runContext, cancel = context.WithTimeout(ctx, request.Timeout)
+	}
 	defer cancel()
 	command := exec.CommandContext(runContext, request.Command[0], request.Command[1:]...)
 	command.Dir = request.Dir
@@ -85,7 +89,7 @@ func Run(ctx context.Context, request Request) (Result, error) {
 	case ctx.Err() != nil:
 		result.Status = StatusCancelled
 		result.Error = ctx.Err()
-	case errors.Is(runContext.Err(), context.DeadlineExceeded):
+	case request.Timeout > 0 && errors.Is(runContext.Err(), context.DeadlineExceeded):
 		result.Status = StatusTimeout
 		result.Error = context.DeadlineExceeded
 	case err != nil:

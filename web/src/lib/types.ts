@@ -71,7 +71,7 @@ export type ConfigData = {
   execution: {
     default_input_dir: string
     threads: number
-    timeout_seconds: number
+    timeout_ms: number
   }
   pahcer: {
     setting_file: string
@@ -136,8 +136,10 @@ export type ComparisonFilter = {
 }
 
 export type ComparisonPair = {
+  input_case_id: string
   a: number
   b: number
+  difference: number
 }
 
 export type Comparison = {

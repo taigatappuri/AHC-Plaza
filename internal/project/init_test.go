@@ -20,7 +20,7 @@ func TestInitializeCreatesProjectFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "[input_format]") || !strings.Contains(string(content), "timeout_seconds = 300") {
+	if !strings.Contains(string(content), "[input_format]") || !strings.Contains(string(content), "timeout_ms = 300000") {
 		t.Fatalf("初期設定が不正です: %s", content)
 	}
 	for _, directory := range []string{"solver", "ahc-plaza/runs", "ahc-plaza/inputs", "ahc-plaza/features"} {

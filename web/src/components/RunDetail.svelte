@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, tick } from 'svelte'
   import { errorMessage } from '../lib/api'
+  import { scoreDistributionCaseResults } from '../lib/feature-filter'
   import { directoryName, formatDuration, formatScore, formatTime, runLabel, statusLabel } from '../lib/formatters'
   import type { CaseResult, Run, RunStatistics, FeatureData } from '../lib/types'
   import ScoreDistributionChart from './ScoreDistributionChart.svelte'
@@ -34,6 +35,7 @@
   let commentDraft = ''
   let commentSaving = false
   let commentError = ''
+  let filteredCaseResults: CaseResult[] | null = null
   type CaseSortKey = 'name' | 'score' | 'time'
   type SortDirection = 'asc' | 'desc'
   type AriaSort = 'ascending' | 'descending' | 'none'
@@ -50,6 +52,7 @@
         : left.execution_time_ns - right.execution_time_ns
     return caseSortDirection === 'asc' ? comparison : -comparison
   })
+  $: distributionCaseResults = scoreDistributionCaseResults(caseResults, filteredCaseResults)
 
   function sortCases(key: CaseSortKey) {
     if (caseSortKey === key) {
@@ -84,6 +87,10 @@
     selectedCaseID = caseID
     await tick()
     visualizerAnchor?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function updateFilteredCaseResults(results: CaseResult[] | null) {
+    filteredCaseResults = results
   }
 
   function handleCaseRowKeydown(event: KeyboardEvent, caseID: string) {
@@ -166,8 +173,8 @@
       <div><dt>ケース</dt><dd>{hasStatistics ? displayedStatistics?.case_count : '—'}</dd></div>
     </dl>
   </section>
-  <ScoreDistributionChart {caseResults} />
-  <FeatureScoreAnalysis {caseResults} {featureData} onSelectCase={selectCase} {onConfigureInputFormat} />
+  <ScoreDistributionChart caseResults={distributionCaseResults} />
+  <FeatureScoreAnalysis {caseResults} {featureData} onSelectCase={selectCase} {onConfigureInputFormat} onFilteredCaseResultsChange={updateFilteredCaseResults} />
   <div class="detail-grid">
     <div class="panel case-panel"><div class="panel-header"><h2>ケース</h2><div class="case-panel-meta"><span class="count-badge">{caseResults.length}件</span></div></div><div class="case-table-wrap"><table><thead><tr><th aria-sort={caseSortAriaValue('name')}><button class="case-sort-button" type="button" aria-label={`${caseSortLabels.name}を${nextCaseSortDirection('name')}でソート`} onclick={() => sortCases('name')}>{caseSortLabels.name}<span class="case-sort-indicator" aria-hidden="true">{caseSortIndicator('name')}</span></button></th><th aria-sort={caseSortAriaValue('score')}><button class="case-sort-button" type="button" aria-label={`${caseSortLabels.score}を${nextCaseSortDirection('score')}でソート`} onclick={() => sortCases('score')}>{caseSortLabels.score}<span class="case-sort-indicator" aria-hidden="true">{caseSortIndicator('score')}</span></button></th><th aria-sort={caseSortAriaValue('time')}><button class="case-sort-button" type="button" aria-label={`${caseSortLabels.time}を${nextCaseSortDirection('time')}でソート`} onclick={() => sortCases('time')}>{caseSortLabels.time}<span class="case-sort-indicator" aria-hidden="true">{caseSortIndicator('time')}</span></button></th><th>状態</th></tr></thead><tbody>{#each displayedCaseResults as item}<tr class="case-row" class:selected={selectedCaseID === item.input_case_id} role="button" tabindex="0" aria-pressed={selectedCaseID === item.input_case_id} title="ビジュアライザでケースを表示" onclick={() => selectCase(item.input_case_id)} onkeydown={(event) => handleCaseRowKeydown(event, item.input_case_id)}><td class="mono">{item.input_case_id}</td><td class="score-cell">{item.score.toLocaleString()}</td><td class="mono muted-text">{formatDuration(item.execution_time_ns)}</td><td><span class="case-status {item.status}">{item.status === 'succeeded' ? 'OK' : statusLabel(item.status)}</span></td></tr>{/each}</tbody></table></div></div>
     <div class="visualizer-anchor" bind:this={visualizerAnchor}><VisualizerPanel {selectedRun} {caseResults} bind:selectedCaseID /></div>

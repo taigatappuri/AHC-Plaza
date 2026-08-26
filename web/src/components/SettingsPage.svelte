@@ -131,7 +131,7 @@
       <div class="settings-section-body">
         <div class="form-grid">
           <label>スレッド数<input type="number" min="0" bind:value={form.execution.threads} class:invalid={validationErrors['execution.threads']} /></label>
-          <label>全ケースのタイムアウト（秒）<input type="number" min="1" bind:value={form.execution.timeout_seconds} class:invalid={validationErrors['execution.timeout_seconds']} /></label>
+          <label>各ケースのタイムアウト（ミリ秒）<input type="number" min="1" bind:value={form.execution.timeout_ms} class:invalid={validationErrors['execution.timeout_ms']} /></label>
           <label>pahcer設定ファイル<input bind:value={form.pahcer.setting_file} class:invalid={validationErrors['pahcer.setting_file']} /></label>
         </div>
       </div>

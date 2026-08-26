@@ -60,7 +60,7 @@
   let inputGenerationResult: InputGenerateResult | null = null
   let inputGenerating = false
   let threads = 0
-  let timeoutSeconds = 300
+  let timeoutMilliseconds = 300000
   let comment = ''
   let compareA = ''
   let compareB = ''
@@ -122,7 +122,7 @@
   function resetRunDefaults() {
     if (!configData) return
     threads = configData.execution.threads
-    timeoutSeconds = configData.execution.timeout_seconds
+    timeoutMilliseconds = configData.execution.timeout_ms
   }
 
   async function loadSolvers() {
@@ -249,7 +249,7 @@
       const result = await requestJSON<{ run_id: string; status: string }>('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ solver, input_dir: inputDir, threads, timeout_seconds: timeoutSeconds, comment })
+        body: JSON.stringify({ solver, input_dir: inputDir, threads, timeout_ms: timeoutMilliseconds, comment })
       })
       message = `Run ${shortId(result.run_id)} を開始`
       await loadRuns()
@@ -357,7 +357,7 @@
       {#if message}<div class="notice">{message}</div>{/if}
 
       {#if activeTab === 'overview'}
-        <RunCommand bind:solver {solvers} {solverLoading} {solverError} onRefreshSolvers={loadSolvers} {inputDirectories} inputRoot={configData?.execution.default_input_dir ?? 'ahc-plaza/inputs'} {inputDirectoryLoading} {inputDirectoryError} onRefreshInputDirectories={loadInputDirectories} bind:inputDir bind:threads bind:timeoutSeconds bind:comment {loading} defaultsAvailable={configData !== null} onResetDefaults={resetRunDefaults} onSubmit={startRun} />
+        <RunCommand bind:solver {solvers} {solverLoading} {solverError} onRefreshSolvers={loadSolvers} {inputDirectories} inputRoot={configData?.execution.default_input_dir ?? 'ahc-plaza/inputs'} {inputDirectoryLoading} {inputDirectoryError} onRefreshInputDirectories={loadInputDirectories} bind:inputDir bind:threads bind:timeoutMilliseconds bind:comment {loading} defaultsAvailable={configData !== null} onResetDefaults={resetRunDefaults} onSubmit={startRun} />
         <section class="recent-runs">
           <header class="section-heading"><h2>直近の実行履歴</h2><button class="context-action" type="button" onclick={refreshRuns} disabled={runsRefreshing}>{runsRefreshing ? '更新中…' : '更新'}</button></header>
           <RunTable runs={runs.slice(0, 5)} selectedRunId={selectedRun?.id ?? ''} compact onSelect={openRunDetail} />

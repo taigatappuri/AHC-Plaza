@@ -1,10 +1,12 @@
 package pahcer
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 	"github.com/taigatappuri/AHC-Plaza/internal/domain"
@@ -15,7 +17,13 @@ type Workspace struct {
 	SettingFile string
 }
 
-func PrepareWorkspace(runDir, sourceSnapshot, toolsDir, settingFile string, inputCases []domain.InputCase, threads int) (Workspace, error) {
+type WorkspaceOptions struct {
+	Threads                 int
+	CaseTimeoutMilliseconds int
+	CaseRunner              string
+}
+
+func PrepareWorkspace(runDir, sourceSnapshot, toolsDir, settingFile string, inputCases []domain.InputCase, options WorkspaceOptions) (Workspace, error) {
 	if len(inputCases) == 0 {
 		return Workspace{}, fmt.Errorf("no input cases found")
 	}
@@ -50,13 +58,19 @@ func PrepareWorkspace(runDir, sourceSnapshot, toolsDir, settingFile string, inpu
 	}
 
 	settingDestination := filepath.Join(workspaceDir, filepath.Base(settingFile))
-	if err := rewriteSettingFile(settingFile, settingDestination, len(inputCases), threads); err != nil {
+	if err := rewriteSettingFile(settingFile, settingDestination, len(inputCases), options); err != nil {
 		return Workspace{}, err
 	}
 	return Workspace{Dir: workspaceDir, SettingFile: filepath.Base(settingDestination)}, nil
 }
 
-func rewriteSettingFile(source, destination string, inputCaseCount, threads int) error {
+func rewriteSettingFile(source, destination string, inputCaseCount int, options WorkspaceOptions) error {
+	if options.CaseTimeoutMilliseconds < 1 {
+		return errors.New("case timeout must be at least 1 millisecond")
+	}
+	if options.CaseRunner == "" {
+		return errors.New("case runner is required")
+	}
 	var raw map[string]interface{}
 	if _, err := toml.DecodeFile(source, &raw); err != nil {
 		return fmt.Errorf("could not read pahcer settings: %w", err)
@@ -68,7 +82,7 @@ func rewriteSettingFile(source, destination string, inputCaseCount, threads int)
 	}
 	test["start_seed"] = 0
 	test["end_seed"] = inputCaseCount
-	test["threads"] = threads
+	test["threads"] = options.Threads
 	test["out_dir"] = "pahcer"
 
 	steps, ok := asSlice(test["test_steps"])
@@ -86,6 +100,16 @@ func rewriteSettingFile(source, destination string, inputCaseCount, threads int)
 		}
 		if _, exists := step["stdin"]; exists {
 			step["stdin"] = "./tools/in/{SEED04}.txt"
+			program, ok := step["program"].(string)
+			if !ok || program == "" {
+				return errors.New("test_steps program is invalid")
+			}
+			arguments, err := commandArguments(step["args"])
+			if err != nil {
+				return err
+			}
+			step["program"] = options.CaseRunner
+			step["args"] = append([]string{"case-exec", "--timeout-ms", strconv.Itoa(options.CaseTimeoutMilliseconds), "--", program}, arguments...)
 			stdinCount++
 		}
 	}
@@ -107,6 +131,28 @@ func rewriteSettingFile(source, destination string, inputCaseCount, threads int)
 		return fmt.Errorf("could not write Run pahcer settings: %w", err)
 	}
 	return nil
+}
+
+func commandArguments(value interface{}) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	switch arguments := value.(type) {
+	case []string:
+		return append([]string(nil), arguments...), nil
+	case []interface{}:
+		result := make([]string, len(arguments))
+		for index, argument := range arguments {
+			text, ok := argument.(string)
+			if !ok {
+				return nil, errors.New("test_steps args are invalid")
+			}
+			result[index] = text
+		}
+		return result, nil
+	default:
+		return nil, errors.New("test_steps args are invalid")
+	}
 }
 
 func asSlice(value interface{}) ([]interface{}, bool) {

@@ -11,7 +11,7 @@
   export let onRefreshInputDirectories: () => void = () => {}
   export let inputDir = ''
   export let threads = 0
-  export let timeoutSeconds = 300
+  export let timeoutMilliseconds = 300000
   export let comment = ''
   export let loading = false
   export let defaultsAvailable = false
@@ -54,7 +54,7 @@
         <button class="text-action defaults-action" type="button" onclick={onResetDefaults} disabled={!defaultsAvailable} title="ahc-plaza.tomlの実行設定に戻す">デフォルトに戻す</button>
       </div>
       <div class="execution-option-fields">
-        <label><span class="option-label">全ケースのタイムアウト（秒）</span><input type="number" min="1" bind:value={timeoutSeconds} /></label>
+        <label><span class="option-label">各ケースのタイムアウト（ミリ秒）</span><input type="number" min="1" bind:value={timeoutMilliseconds} /></label>
         <label><span class="option-label">スレッド数</span><input type="number" min="0" bind:value={threads} title="0で自動設定" /></label>
       </div>
     </div>

@@ -21,7 +21,7 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
   pahcer_version TEXT NOT NULL,
   compiler_version TEXT NOT NULL,
   threads INTEGER NOT NULL,
-  timeout_seconds INTEGER NOT NULL,
+  timeout_ms INTEGER NOT NULL,
   status TEXT NOT NULL,
   comment TEXT NOT NULL,
   created_at TEXT NOT NULL,
@@ -66,6 +66,18 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "runs", "run_number", "INTEGER"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, "runs", "timeout_ms", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	legacyTimeoutExists, err := s.columnExists(ctx, "runs", "timeout_seconds")
+	if err != nil {
+		return err
+	}
+	if legacyTimeoutExists {
+		if _, err := s.db.ExecContext(ctx, `UPDATE runs SET timeout_ms = timeout_seconds * 1000 WHERE timeout_ms = 0`); err != nil {
+			return fmt.Errorf("could not migrate Run timeouts to milliseconds: %w", err)
+		}
+	}
 	if _, err := s.db.ExecContext(ctx, `
 WITH numbered AS (
   SELECT id, ROW_NUMBER() OVER (ORDER BY created_at, id) +
@@ -89,9 +101,9 @@ ON CONFLICT(name) DO UPDATE SET next_number = MAX(next_number, excluded.next_num
 }
 
 func (s *SQLiteStore) ensureColumn(ctx context.Context, table, column, definition string) error {
-	var exists bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name = ?)`, table, column).Scan(&exists); err != nil {
-		return fmt.Errorf("could not inspect %s.%s: %w", table, column, err)
+	exists, err := s.columnExists(ctx, table, column)
+	if err != nil {
+		return err
 	}
 	if exists {
 		return nil
@@ -100,4 +112,12 @@ func (s *SQLiteStore) ensureColumn(ctx context.Context, table, column, definitio
 		return fmt.Errorf("could not add %s.%s: %w", table, column, err)
 	}
 	return nil
+}
+
+func (s *SQLiteStore) columnExists(ctx context.Context, table, column string) (bool, error) {
+	var exists bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name = ?)`, table, column).Scan(&exists); err != nil {
+		return false, fmt.Errorf("could not inspect %s.%s: %w", table, column, err)
+	}
+	return exists, nil
 }

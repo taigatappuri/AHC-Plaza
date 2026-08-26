@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -70,6 +73,85 @@ measure_time = true
 func TestExecuteRunRequiresSolver(t *testing.T) {
 	if err := execute([]string{"run"}); err == nil {
 		t.Fatal("solverなしの実行を許可しました")
+	}
+}
+
+func TestRunCaseCommandTimesOut(t *testing.T) {
+	var stderr bytes.Buffer
+	started := time.Now()
+	err := runCaseCommand(context.Background(), []string{"sh", "-c", "sleep 10"}, 30*time.Millisecond, nil, &bytes.Buffer{}, &stderr)
+	var commandErr *commandError
+	if !errors.As(err, &commandErr) || commandErr.Code != 124 {
+		t.Fatalf("error = %#v, want exit code 124", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("ケースのタイムアウト後もプロセスが残っています")
+	}
+}
+
+func TestRunCaseCommandCanBeCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(30*time.Millisecond, cancel)
+	started := time.Now()
+	err := runCaseCommand(ctx, []string{"sh", "-c", "sleep 10"}, time.Second, nil, &bytes.Buffer{}, &bytes.Buffer{})
+	var commandErr *commandError
+	if !errors.As(err, &commandErr) || commandErr.Code != 130 {
+		t.Fatalf("error = %#v, want exit code 130", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("キャンセル後もケースプロセスが残っています")
+	}
+}
+
+func TestRunCaseCommandForwardsArgumentsAndStandardIO(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runCaseCommand(
+		context.Background(),
+		[]string{"sh", "-c", `read value; printf 'out:%s:%s' "$value" "$1"; printf 'err:%s' "$1" >&2`, "sh", "argument"},
+		time.Second,
+		strings.NewReader("input\n"),
+		&stdout,
+		&stderr,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != "out:input:argument" || stderr.String() != "err:argument" {
+		t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestExecuteCaseValidatesArgumentsAndRunsCommand(t *testing.T) {
+	for _, args := range [][]string{nil, {"--timeout-ms", "1"}} {
+		var commandErr *commandError
+		if err := executeCase(args); !errors.As(err, &commandErr) || commandErr.Code != 2 {
+			t.Fatalf("args = %#v, error = %#v, want exit code 2", args, err)
+		}
+	}
+	if err := executeCase([]string{"--timeout-ms", "1", "--", "true"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunCaseCommandValidatesAndPropagatesExitCode(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		arguments []string
+		timeout   time.Duration
+		wantCode  int
+	}{
+		{name: "commandなし", timeout: time.Second, wantCode: 2},
+		{name: "timeoutなし", arguments: []string{"true"}, wantCode: 2},
+		{name: "終了コード", arguments: []string{"sh", "-c", "exit 7"}, timeout: time.Second, wantCode: 7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var commandErr *commandError
+			err := runCaseCommand(context.Background(), test.arguments, test.timeout, nil, &bytes.Buffer{}, &bytes.Buffer{})
+			if !errors.As(err, &commandErr) || commandErr.Code != test.wantCode {
+				t.Fatalf("error = %#v, want exit code %d", err, test.wantCode)
+			}
+		})
 	}
 }
 

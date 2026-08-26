@@ -26,8 +26,8 @@ objective = "max"
 	if config.File.Execution.DefaultInputDir != "ahc-plaza/inputs" {
 		t.Fatalf("input dir = %q, want ahc-plaza/inputs", config.File.Execution.DefaultInputDir)
 	}
-	if config.File.Execution.TimeoutSeconds != 300 {
-		t.Fatalf("timeout = %d, want 300", config.File.Execution.TimeoutSeconds)
+	if config.File.Execution.TimeoutMilliseconds != 300000 {
+		t.Fatalf("timeout = %d, want 300000", config.File.Execution.TimeoutMilliseconds)
 	}
 	if config.File.Statistics.ConfidenceLevel != 0.95 {
 		t.Fatalf("confidence = %v, want 0.95", config.File.Statistics.ConfidenceLevel)
@@ -40,6 +40,38 @@ objective = "max"
 	}
 	if config.File.InputFormat.Features == nil || len(config.File.InputFormat.Features) != 0 {
 		t.Fatalf("input features = %#v, want empty features", config.File.InputFormat)
+	}
+}
+
+func TestLoadMigratesLegacyTimeoutSeconds(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "ahc-plaza.toml")
+	content := `[project]
+problem = "ahc000"
+objective = "max"
+
+[execution]
+timeout_seconds = 2
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.File.Execution.TimeoutMilliseconds != 2000 {
+		t.Fatalf("timeout = %d, want 2000", loaded.File.Execution.TimeoutMilliseconds)
+	}
+	if _, err := Save(path, loaded.File); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(migrated), "timeout_ms = 2000") || strings.Contains(string(migrated), "timeout_seconds") {
+		t.Fatalf("旧設定がミリ秒へ移行されていません: %s", migrated)
 	}
 }
 
@@ -277,7 +309,7 @@ func TestSaveWritesValidatedConfig(t *testing.T) {
 	written, err := Save(path, FileConfig{
 		Project:    ProjectConfig{Problem: "ahc999", Objective: "min"},
 		Paths:      PathsConfig{SolverDir: "src", ToolsDir: "tester"},
-		Execution:  ExecutionConfig{DefaultInputDir: "tester/in", Threads: 8, TimeoutSeconds: 15},
+		Execution:  ExecutionConfig{DefaultInputDir: "tester/in", Threads: 8, TimeoutMilliseconds: 15000},
 		Pahcer:     PahcerConfig{SettingFile: "pahcer_config.toml"},
 		Score:      ScoreConfig{InvalidScore: -1, IncludeInvalidCases: false},
 		Statistics: StatisticsConfig{ConfidenceLevel: 0.99, BootstrapIterations: 20000},
@@ -306,6 +338,8 @@ func TestSaveWritesValidatedConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "[project]") ||
 		!strings.Contains(string(content), "problem = \"ahc999\"") ||
+		!strings.Contains(string(content), "timeout_ms = 15000") ||
+		strings.Contains(string(content), "timeout_seconds") ||
 		!strings.Contains(string(content), "[[input_format.variables]]") ||
 		!strings.Contains(string(content), "name = \"N\"") {
 		t.Fatalf("保存内容 = %s", content)

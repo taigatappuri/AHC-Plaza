@@ -41,6 +41,25 @@ func TestRunCapturesOutput(t *testing.T) {
 	}
 }
 
+func TestRunAllowsNoOverallTimeout(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux専用のプロセス制御テストです")
+	}
+	runDir := t.TempDir()
+	result, err := Run(context.Background(), Request{
+		Command:    []string{"sh", "-c", "printf completed"},
+		Dir:        runDir,
+		StdoutPath: filepath.Join(runDir, "stdout.log"),
+		StderrPath: filepath.Join(runDir, "stderr.log"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StatusSucceeded {
+		t.Fatalf("status = %q, want succeeded", result.Status)
+	}
+}
+
 func TestRunTimesOutAndKillsProcessGroup(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux専用のプロセス制御テストです")

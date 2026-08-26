@@ -1,9 +1,15 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
+  import { errorMessage, requestJSON } from '../lib/api'
+  import { comparisonCasesForResult } from '../lib/comparison-cases'
   import { formatScore, runLabel } from '../lib/formatters'
-  import type { Comparison, InputFeatureDefinition, Run, FeatureCondition, FeatureConditionOperator } from '../lib/types'
+  import type { CaseResult, Comparison, InputFeatureDefinition, Run, FeatureCondition, FeatureConditionOperator } from '../lib/types'
   import ComparisonHistogram from './ComparisonHistogram.svelte'
+  import VisualizerPanel from './VisualizerPanel.svelte'
 
   type DraftCondition = Omit<FeatureCondition, 'value'> & { id: number; value?: number }
+  type RunCasesResponse = { cases: CaseResult[] }
+  type ComparisonCase = { id: string; a: CaseResult; b: CaseResult }
 
   export let runs: Run[] = []
   export let compareA = ''
@@ -22,6 +28,15 @@
   ]
   let conditions: DraftCondition[] = []
   let nextConditionID = 1
+  let comparisonCases: ComparisonCase[] = []
+  let selectedCaseID = ''
+  let caseLoading = false
+  let caseError = ''
+  let requestedPair = ''
+  let caseRequestSerial = 0
+  let visualizerReady = false
+  let visualizerLoading = true
+  let visualizerError = ''
 
   const isReady = (condition: DraftCondition): condition is DraftCondition & { value: number } =>
     Boolean(condition.feature) && typeof condition.value === 'number' && Number.isFinite(condition.value)
@@ -39,6 +54,68 @@
   const signedPercent = (value: number) => `${value > 0 ? '+' : ''}${(value * 100).toFixed(2)}%`
   const differenceLabel = () => objective === 'max' ? 'A − B' : 'B − A'
   const pValue = (value: number) => value < 0.001 ? 'p < 0.001' : `p = ${value.toFixed(3)}`
+
+  $: runA = runs.find((run) => run.id === compareA) ?? null
+  $: runB = runs.find((run) => run.id === compareB) ?? null
+  $: selectableComparisonCases = comparisonCasesForResult(comparisonCases, comparison)
+  $: selectedComparisonCase = selectableComparisonCases.find((item) => item.id === selectedCaseID) ?? selectableComparisonCases[0] ?? null
+  $: displayedSelectedCaseID = selectedComparisonCase?.id ?? ''
+  $: runPair = compareA && compareB ? `${compareA}:${compareB}` : ''
+  $: if (runPair && runPair !== requestedPair) {
+    requestedPair = runPair
+    void loadComparisonCases(compareA, compareB, runPair)
+  }
+  $: if (!runPair && requestedPair) {
+    requestedPair = ''
+    caseRequestSerial += 1
+    comparisonCases = []
+    selectedCaseID = ''
+    caseError = ''
+    caseLoading = false
+  }
+
+  onMount(() => {
+    void loadVisualizerStatus()
+  })
+
+  async function loadVisualizerStatus() {
+    visualizerLoading = true
+    visualizerError = ''
+    try {
+      const status = await requestJSON<{ ready: boolean }>('/api/visualizer')
+      visualizerReady = status.ready
+    } catch (reason) {
+      visualizerReady = false
+      visualizerError = errorMessage(reason)
+    } finally {
+      visualizerLoading = false
+    }
+  }
+
+  async function loadComparisonCases(runAID: string, runBID: string, pair: string) {
+    const serial = ++caseRequestSerial
+    caseLoading = true
+    caseError = ''
+    comparisonCases = []
+    selectedCaseID = ''
+    try {
+      const [detailA, detailB] = await Promise.all([
+        requestJSON<RunCasesResponse>(`/api/runs/${encodeURIComponent(runAID)}`),
+        requestJSON<RunCasesResponse>(`/api/runs/${encodeURIComponent(runBID)}`)
+      ])
+      if (serial !== caseRequestSerial || pair !== runPair) return
+      const casesB = new Map(detailB.cases.map((item) => [item.input_case_id, item]))
+      comparisonCases = detailA.cases.flatMap((a) => {
+        const b = casesB.get(a.input_case_id)
+        return b ? [{ id: a.input_case_id, a, b }] : []
+      })
+      selectedCaseID = comparisonCases[0]?.id ?? ''
+    } catch (reason) {
+      if (serial === caseRequestSerial && pair === runPair) caseError = errorMessage(reason)
+    } finally {
+      if (serial === caseRequestSerial && pair === runPair) caseLoading = false
+    }
+  }
 
   function addCondition() {
     if (!features[0] || conditions.length >= 32) return
@@ -104,6 +181,50 @@
   {:else}
     <div class="empty-state compact"><strong>比較を実行すると結果を表示します</strong></div>
   {/if}
+
+  <section class="comparison-visualizer-section">
+    <header>
+      <div><h2>ケースをビジュアライザで比較</h2><p>同じケース ID の各 Run の入力と出力を表示します。</p></div>
+      {#if selectedComparisonCase}<span class="count-badge">{comparison?.filter.active ? '対象' : '共通'} {selectableComparisonCases.length}件</span>{/if}
+    </header>
+
+    {#if !compareA || !compareB}
+      <div class="empty-state compact"><strong>Run A と Run B を選択してください</strong></div>
+    {:else if caseLoading}
+      <div class="empty-state compact"><strong>共通ケースを読み込み中…</strong></div>
+    {:else if caseError}
+      <div class="visualizer-error">共通ケースを取得できません: {caseError}</div>
+    {:else if selectableComparisonCases.length === 0}
+      <div class="empty-state compact"><strong>{comparison?.filter.active ? '入力条件に一致する共通ケースがありません' : '2つの Run に共通するケースがありません'}</strong></div>
+    {:else}
+      <div class="comparison-case-picker">
+        <label>
+          <span class="field-label">ケース</span>
+          <select value={displayedSelectedCaseID} onchange={(event) => selectedCaseID = event.currentTarget.value} aria-label="比較するケース">
+            {#each selectableComparisonCases as item}
+              <option value={item.id}>{item.id} · A {formatScore(item.a.score)} / B {formatScore(item.b.score)} · seed {item.a.seed}</option>
+            {/each}
+          </select>
+        </label>
+        {#if selectedComparisonCase}
+          <div class="comparison-case-meta"><span>Run A</span><strong>{formatScore(selectedComparisonCase.a.score)}</strong><span>Run B</span><strong>{formatScore(selectedComparisonCase.b.score)}</strong></div>
+        {/if}
+      </div>
+
+      {#if visualizerLoading}
+        <div class="empty-state compact"><strong>ビジュアライザを確認中…</strong></div>
+      {:else if visualizerError}
+        <div class="visualizer-error">ビジュアライザの状態を取得できません: {visualizerError}</div>
+      {:else if !visualizerReady}
+        <div class="empty-state compact"><strong>公式ビジュアライザが未設定です</strong><span>実行詳細画面から設定してください。</span></div>
+      {:else if runA && runB && selectedComparisonCase}
+        <div class="comparison-visualizer-grid">
+          <VisualizerPanel selectedRun={runA} caseResults={[selectedComparisonCase.a]} selectedCaseID={displayedSelectedCaseID} title={`Run A · ${runLabel(runA.run_number, runA.id)}`} comparisonMode />
+          <VisualizerPanel selectedRun={runB} caseResults={[selectedComparisonCase.b]} selectedCaseID={displayedSelectedCaseID} title={`Run B · ${runLabel(runB.run_number, runB.id)}`} comparisonMode />
+        </div>
+      {/if}
+    {/if}
+  </section>
 </section>
 
 <style>
@@ -142,4 +263,22 @@
   .run-means .run-a-mean dt, .run-means .run-a-mean dd { color: var(--run-a); }
   .run-means .run-b-mean dt, .run-means .run-b-mean dd { color: var(--run-b); }
   .run-means dd { margin: 6px 0 0; color: var(--graphite); font: 15px var(--mono); }
+  .comparison-visualizer-section { margin-top: 16px; background: var(--paper); }
+  .comparison-visualizer-section > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
+  .comparison-visualizer-section h2 { margin: 0; font-size: 15px; }
+  .comparison-visualizer-section header p { margin: 4px 0 0; color: var(--pencil); font-size: 11px; }
+  .comparison-case-picker { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
+  .comparison-case-picker label { display: grid; min-width: min(100%, 480px); gap: 6px; }
+  .comparison-case-meta { display: grid; grid-template-columns: auto auto auto auto; gap: 6px 10px; color: var(--pencil); font: 11px var(--mono); }
+  .comparison-case-meta strong { color: var(--graphite-soft); font-weight: 600; }
+  .comparison-visualizer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--rule); }
+  .comparison-visualizer-grid :global(.visualizer-panel) { min-width: 0; }
+  .comparison-visualizer-grid :global(.visualizer-toolbar) { grid-template-columns: 72px minmax(0, 1fr); }
+  .comparison-visualizer-grid :global(.visualizer-scale) { grid-column: auto; }
+
+  @media (max-width: 1100px) {
+    .compare-form { grid-template-columns: 1fr 36px 1fr; }
+    .compare-form .primary-action { grid-column: 1 / -1; }
+    .comparison-visualizer-grid { grid-template-columns: 1fr; }
+  }
 </style>

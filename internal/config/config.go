@@ -32,9 +32,10 @@ type PathsConfig struct {
 }
 
 type ExecutionConfig struct {
-	DefaultInputDir string `toml:"default_input_dir" json:"default_input_dir"`
-	Threads         int    `toml:"threads" json:"threads"`
-	TimeoutSeconds  int    `toml:"timeout_seconds" json:"timeout_seconds"`
+	DefaultInputDir      string `toml:"default_input_dir" json:"default_input_dir"`
+	Threads              int    `toml:"threads" json:"threads"`
+	TimeoutMilliseconds  int    `toml:"timeout_ms" json:"timeout_ms"`
+	LegacyTimeoutSeconds *int   `toml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
 }
 
 type PahcerConfig struct {
@@ -133,8 +134,8 @@ func (c Config) Validate() error {
 	if c.File.Execution.Threads < 0 {
 		return errors.New("execution.threads must be 0 or greater")
 	}
-	if c.File.Execution.TimeoutSeconds <= 0 {
-		return errors.New("execution.timeout_seconds must be 1 or greater")
+	if c.File.Execution.TimeoutMilliseconds <= 0 {
+		return errors.New("execution.timeout_ms must be 1 or greater")
 	}
 	if _, err := c.ResolveProjectPath("pahcer.setting_file", c.File.Pahcer.SettingFile); err != nil {
 		return err
@@ -272,7 +273,11 @@ func applyDefaults(file *FileConfig) {
 	setDefault(&file.Paths.SolverDir, "solver")
 	setDefault(&file.Paths.ToolsDir, "tools")
 	setDefault(&file.Execution.DefaultInputDir, "ahc-plaza/inputs")
-	setDefault(&file.Execution.TimeoutSeconds, 300)
+	if file.Execution.TimeoutMilliseconds == 0 && file.Execution.LegacyTimeoutSeconds != nil {
+		file.Execution.TimeoutMilliseconds = *file.Execution.LegacyTimeoutSeconds * 1000
+	}
+	file.Execution.LegacyTimeoutSeconds = nil
+	setDefault(&file.Execution.TimeoutMilliseconds, 300000)
 	setDefault(&file.Pahcer.SettingFile, "pahcer_config.toml")
 	setDefault(&file.Statistics.ConfidenceLevel, 0.95)
 	setDefault(&file.Statistics.BootstrapIterations, 10000)

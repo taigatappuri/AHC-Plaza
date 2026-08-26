@@ -44,8 +44,8 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 	if request.Threads < 0 {
 		request.Threads = cfg.File.Execution.Threads
 	}
-	if request.TimeoutSeconds <= 0 {
-		request.TimeoutSeconds = cfg.File.Execution.TimeoutSeconds
+	if request.TimeoutMilliseconds <= 0 {
+		request.TimeoutMilliseconds = cfg.File.Execution.TimeoutMilliseconds
 	}
 	if request.PahcerBinary == "" {
 		request.PahcerBinary = "pahcer"
@@ -78,6 +78,10 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 	if err != nil {
 		return RunSummary{}, err
 	}
+	caseRunner, err := os.Executable()
+	if err != nil {
+		return RunSummary{}, fmt.Errorf("could not locate the case runner: %w", err)
+	}
 	runID := request.RunID
 	if runID == "" {
 		runID, err = NewRunID()
@@ -94,30 +98,32 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 	if err != nil {
 		return RunSummary{}, err
 	}
-	workspace, err := pahcer.PrepareWorkspace(runDir, source.SnapshotPath, toolsDir, settingFile, inputCases, request.Threads)
+	workspace, err := pahcer.PrepareWorkspace(runDir, source.SnapshotPath, toolsDir, settingFile, inputCases, pahcer.WorkspaceOptions{
+		Threads: request.Threads, CaseTimeoutMilliseconds: request.TimeoutMilliseconds, CaseRunner: caseRunner,
+	})
 	if err != nil {
 		return RunSummary{}, err
 	}
 
 	createdAt := time.Now().UTC()
 	run := domain.Run{
-		ID:              runID,
-		Problem:         cfg.File.Project.Problem,
-		Objective:       cfg.File.Project.Objective,
-		SolverPath:      relativePath(cfg.ProjectRoot, solverPath),
-		InputDir:        relativePath(cfg.ProjectRoot, inputDir),
-		InputCasesHash:  cases.HashList(inputCases),
-		SourcePath:      relativePath(cfg.ProjectRoot, source.SnapshotPath),
-		SourceHash:      source.SHA256,
-		ConfigHash:      fileHash(cfg.FilePath),
-		PahcerVersion:   "unknown",
-		CompilerVersion: "unknown",
-		Threads:         request.Threads,
-		TimeoutSeconds:  request.TimeoutSeconds,
-		Status:          domain.RunQueued,
-		Comment:         request.Comment,
-		CreatedAt:       createdAt,
-		StartedAt:       createdAt,
+		ID:                  runID,
+		Problem:             cfg.File.Project.Problem,
+		Objective:           cfg.File.Project.Objective,
+		SolverPath:          relativePath(cfg.ProjectRoot, solverPath),
+		InputDir:            relativePath(cfg.ProjectRoot, inputDir),
+		InputCasesHash:      cases.HashList(inputCases),
+		SourcePath:          relativePath(cfg.ProjectRoot, source.SnapshotPath),
+		SourceHash:          source.SHA256,
+		ConfigHash:          fileHash(cfg.FilePath),
+		PahcerVersion:       "unknown",
+		CompilerVersion:     "unknown",
+		Threads:             request.Threads,
+		TimeoutMilliseconds: request.TimeoutMilliseconds,
+		Status:              domain.RunQueued,
+		Comment:             request.Comment,
+		CreatedAt:           createdAt,
+		StartedAt:           createdAt,
 	}
 
 	if database == nil {
@@ -154,7 +160,7 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 		SettingFile: workspace.SettingFile,
 		StdoutPath:  stdoutPath,
 		StderrPath:  stderrPath,
-		Timeout:     time.Duration(request.TimeoutSeconds) * time.Second,
+		Timeout:     0,
 	})
 	finishedAt := time.Now().UTC()
 	run.FinishedAt = &finishedAt

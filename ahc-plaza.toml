@@ -9,7 +9,7 @@ tools_dir = "tools"
 [execution]
 default_input_dir = "ahc-plaza/inputs"
 threads = 0
-timeout_seconds = 300
+timeout_ms = 300000
 
 [pahcer]
 setting_file = "pahcer_config.toml"

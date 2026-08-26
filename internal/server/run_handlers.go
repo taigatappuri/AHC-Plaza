@@ -226,8 +226,8 @@ func (s *Server) validateRunRequest(input usecase.RunRequest) error {
 	if input.Threads < -1 {
 		return errors.New("threadsは-1以上にしてください")
 	}
-	if input.TimeoutSeconds < 0 {
-		return errors.New("timeout_secondsは0以上にしてください")
+	if input.TimeoutMilliseconds < 0 {
+		return errors.New("timeout_msは0以上にしてください")
 	}
 	return nil
 }
