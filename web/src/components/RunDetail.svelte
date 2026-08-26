@@ -34,6 +34,45 @@
   let commentDraft = ''
   let commentSaving = false
   let commentError = ''
+  type CaseSortKey = 'name' | 'score' | 'time'
+  type SortDirection = 'asc' | 'desc'
+  type AriaSort = 'ascending' | 'descending' | 'none'
+
+  let caseSortKey: CaseSortKey | null = null
+  let caseSortDirection: SortDirection = 'asc'
+  const caseSortLabels: Record<CaseSortKey, string> = { name: 'ケース名', score: 'スコア', time: '時間' }
+
+  $: displayedCaseResults = caseSortKey === null ? caseResults : [...caseResults].sort((left, right) => {
+    const comparison = caseSortKey === 'name'
+      ? left.input_case_id.localeCompare(right.input_case_id, undefined, { numeric: true })
+      : caseSortKey === 'score'
+        ? left.score - right.score
+        : left.execution_time_ns - right.execution_time_ns
+    return caseSortDirection === 'asc' ? comparison : -comparison
+  })
+
+  function sortCases(key: CaseSortKey) {
+    if (caseSortKey === key) {
+      caseSortDirection = caseSortDirection === 'asc' ? 'desc' : 'asc'
+      return
+    }
+    caseSortKey = key
+    caseSortDirection = 'asc'
+  }
+
+  function caseSortIndicator(key: CaseSortKey) {
+    if (caseSortKey !== key) return '↕'
+    return caseSortDirection === 'asc' ? '↑' : '↓'
+  }
+
+  function caseSortAriaValue(key: CaseSortKey): AriaSort {
+    if (caseSortKey !== key) return 'none'
+    return caseSortDirection === 'asc' ? 'ascending' : 'descending'
+  }
+
+  function nextCaseSortDirection(key: CaseSortKey) {
+    return caseSortKey === key && caseSortDirection === 'asc' ? '降順' : '昇順'
+  }
 
   $: if (selectedRun && !editingComment) commentDraft = selectedRun.comment
 
@@ -130,7 +169,7 @@
   <ScoreDistributionChart {caseResults} />
   <FeatureScoreAnalysis {caseResults} {featureData} onSelectCase={selectCase} {onConfigureInputFormat} />
   <div class="detail-grid">
-    <div class="panel case-panel"><div class="panel-header"><h2>ケース</h2><div class="case-panel-meta"><small class="case-panel-hint">選択すると右に表示</small><span class="count-badge">{caseResults.length}件</span></div></div><div class="case-table-wrap"><table><thead><tr><th>ケース</th><th>スコア</th><th>時間</th><th>状態</th></tr></thead><tbody>{#each caseResults as item}<tr class="case-row" class:selected={selectedCaseID === item.input_case_id} role="button" tabindex="0" aria-pressed={selectedCaseID === item.input_case_id} title="ビジュアライザでケースを表示" onclick={() => selectCase(item.input_case_id)} onkeydown={(event) => handleCaseRowKeydown(event, item.input_case_id)}><td class="mono">{item.input_case_id}</td><td class="score-cell">{item.score.toLocaleString()}</td><td class="mono muted-text">{formatDuration(item.execution_time_ns)}</td><td><span class="case-status {item.status}">{item.status === 'succeeded' ? 'OK' : statusLabel(item.status)}</span></td></tr>{/each}</tbody></table></div></div>
+    <div class="panel case-panel"><div class="panel-header"><h2>ケース</h2><div class="case-panel-meta"><span class="count-badge">{caseResults.length}件</span></div></div><div class="case-table-wrap"><table><thead><tr><th aria-sort={caseSortAriaValue('name')}><button class="case-sort-button" type="button" aria-label={`${caseSortLabels.name}を${nextCaseSortDirection('name')}でソート`} onclick={() => sortCases('name')}>{caseSortLabels.name}<span class="case-sort-indicator" aria-hidden="true">{caseSortIndicator('name')}</span></button></th><th aria-sort={caseSortAriaValue('score')}><button class="case-sort-button" type="button" aria-label={`${caseSortLabels.score}を${nextCaseSortDirection('score')}でソート`} onclick={() => sortCases('score')}>{caseSortLabels.score}<span class="case-sort-indicator" aria-hidden="true">{caseSortIndicator('score')}</span></button></th><th aria-sort={caseSortAriaValue('time')}><button class="case-sort-button" type="button" aria-label={`${caseSortLabels.time}を${nextCaseSortDirection('time')}でソート`} onclick={() => sortCases('time')}>{caseSortLabels.time}<span class="case-sort-indicator" aria-hidden="true">{caseSortIndicator('time')}</span></button></th><th>状態</th></tr></thead><tbody>{#each displayedCaseResults as item}<tr class="case-row" class:selected={selectedCaseID === item.input_case_id} role="button" tabindex="0" aria-pressed={selectedCaseID === item.input_case_id} title="ビジュアライザでケースを表示" onclick={() => selectCase(item.input_case_id)} onkeydown={(event) => handleCaseRowKeydown(event, item.input_case_id)}><td class="mono">{item.input_case_id}</td><td class="score-cell">{item.score.toLocaleString()}</td><td class="mono muted-text">{formatDuration(item.execution_time_ns)}</td><td><span class="case-status {item.status}">{item.status === 'succeeded' ? 'OK' : statusLabel(item.status)}</span></td></tr>{/each}</tbody></table></div></div>
     <div class="visualizer-anchor" bind:this={visualizerAnchor}><VisualizerPanel {selectedRun} {caseResults} bind:selectedCaseID /></div>
   </div>
   <section class="artifact-panel">
@@ -184,4 +223,7 @@
   .artifact-tabs button { position: relative; padding: 0 12px; color: var(--pencil); background: transparent; font-size: 12px; }
   .artifact-tabs button.active { color: var(--graphite); font-weight: 600; }
   .artifact-tabs button.active::after { position: absolute; right: 10px; bottom: -1px; left: 10px; height: 2px; background: var(--selection); content: ''; }
+  .case-sort-button { display: inline-flex; align-items: center; gap: 5px; padding: 0; color: inherit; background: transparent; font: inherit; text-align: left; }
+  .case-sort-button:hover { color: var(--selection); }
+  .case-sort-indicator { color: var(--selection); }
 </style>
