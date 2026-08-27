@@ -1,6 +1,7 @@
 # AHC Plaza
 
 AHC Plaza は、[pahcer](https://github.com/terry-u16/pahcer) と連携して AtCoder Heuristic Contest（AHC）の C++ ソースファイル実行、結果保存、比較・分析をローカルでまとめて扱うためのブラウザで動作するGUIツールです。
+詳しい使い方は[AHC Plazaの使い方](https://taigatappuri.net/blog/ahc-plaza/)をご参照ください。
 
 ## 主な機能
 
@@ -10,8 +11,6 @@ AHC Plaza は、[pahcer](https://github.com/terry-u16/pahcer) と連携して At
 - ケースごとのスコア・実行時間・ログの確認
 - 実行間の統計比較と入力条件による絞り込み
 - 特徴量による比較・分析
-
-## イメージ
 
 ### 実行と履歴の確認
 
@@ -28,9 +27,10 @@ AHC Plaza は、[pahcer](https://github.com/terry-u16/pahcer) と連携して At
 ## 対応環境
 
 - Linux（amd64 / arm64）
-- `g++`
-- AHCのローカルテスト環境
+- C++20をコンパイルできる`g++`
+- Rust / Cargo
 - [pahcer](https://github.com/terry-u16/pahcer)
+- Rustソース版のAtCoder公式ローカルテスト環境
 
 ## インストール
 
@@ -46,6 +46,16 @@ curl -fsSL https://github.com/taigatappuri/AHC-Plaza/releases/latest/download/in
 curl -fsSL https://github.com/taigatappuri/AHC-Plaza/releases/latest/download/install.sh \
   | AHC_PLAZA_INSTALL_DIR=/path/to/bin sh
 ```
+
+## 更新
+
+現在実行している AHC Plaza を最新の GitHub Release に更新します。
+
+```sh
+ahc-plaza update
+```
+
+最新バージョンを確認し、更新がある場合だけ現在の実行ファイルと同じ場所へダウンロードします。
 
 ## アンインストール
 
@@ -70,9 +80,9 @@ AHC プロジェクトのルートで pahcer と AHC-Plaza を初期化します
 
 ### pahcer の初期化
 ```sh
-pahcer init --problem <PROBLEM_NAME> --objective <OBJECTIVE> --lang <LANGAGE>
+pahcer init --problem <PROBLEM_NAME> --objective <OBJECTIVE> --lang <LANGUAGE>
 ```
-### AHC-Plaza の初期化
+### AHC Plaza の初期化
 ```sh
 ahc-plaza init --problem <PROBLEM_NAME> --objective <OBJECTIVE>
 ahc-plaza doctor
@@ -82,8 +92,9 @@ ahc-plaza doctor
 ```text
 ahc000/
 ├── tools/                  # 公式ローカルテスト環境
+├── pahcer/                 # pahcer ディレクトリ
 ├── solver/
-│   └── main.cpp            
+│   └── main.cpp
 ├── pahcer_config.toml      # pahcer の設定
 ├── ahc-plaza.toml          # AHC Plaza の設定
 └── ahc-plaza/              # AHC Plaza の管理データ
@@ -101,17 +112,6 @@ ahc-plaza gui --port 8080
 ```
 
 ブラウザで`http://127.0.0.1:8080`を開いてください。
-
-設定項目の例は[ahc-plaza.toml](./ahc-plaza.toml)を参照してください。設定画面の「ディレクトリ」と`run`のパスは、プロジェクトディレクトリからの相対パスです。
-
-入力ファイルからC++で派生特徴量を計算する場合は、ソースを`ahc-plaza/features/`へ置いて設定します。
-
-```toml
-[[input_format.features]]
-name = "average"
-source = "features/average.cpp"
-timeout_ms = 2000
-```
 
 ## ライセンス
 

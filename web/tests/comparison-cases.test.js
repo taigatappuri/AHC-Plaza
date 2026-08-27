@@ -11,6 +11,8 @@ const comparison = (active, inputCaseIDs) => ({
   mean_b: 0,
   mean_improvement: 0,
   improvement_rate: 0,
+  statistical_method: 'paired_bootstrap_t',
+  inference_available: true,
   p_value: 1,
   confidence_level: 0.95,
   confidence_low: 0,

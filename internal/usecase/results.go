@@ -37,8 +37,12 @@ func buildCaseResults(root, runID string, workspace pahcer.Workspace, inputCases
 		caseNumber := fmt.Sprintf("%04d", item.Seed)
 		errorMessage := item.ErrorMessage
 		status := "succeeded"
-		if waSeeds[item.Seed] || errorMessage != "" {
+		if item.TimedOut() {
+			status = "tle"
+		} else if waSeeds[item.Seed] || errorMessage != "" {
 			status = "wa"
+		}
+		if status != "succeeded" {
 			item.Score = invalidScore
 		}
 		outputPath := filepath.Join(workspace.Dir, "tools", "out", caseNumber+".txt")

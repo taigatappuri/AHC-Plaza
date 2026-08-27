@@ -65,6 +65,48 @@ INSERT INTO runs VALUES (
 	}
 }
 
+func TestSQLiteStoreMigratesTimedOutCasesToTLE(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ahc-plaza.db")
+	store, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdAt := time.Now().UTC()
+	run := domain.Run{
+		ID: "run-timeout", Problem: "ahc000", Objective: "max", SolverPath: "solver/a.cpp",
+		InputDir: "ahc-plaza/inputs/cases", InputCasesHash: "hash", SourcePath: "source/a.cpp", SourceHash: "hash",
+		ConfigHash: "hash", PahcerVersion: "pahcer", CompilerVersion: "gcc", Status: domain.RunSucceeded,
+		CreatedAt: createdAt, StartedAt: createdAt,
+	}
+	if err := store.SaveRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCaseResults(context.Background(), []domain.CaseResult{
+		{
+			RunID: run.ID, InputCaseID: "0000", Status: "wa",
+			ErrorMessage: "Failed to run (exit status: 124). command: ahc-plaza case-exec",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err = OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	results, err := store.GetCaseResults(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Status != "tle" {
+		t.Fatalf("results = %#v, want TLE", results)
+	}
+}
+
 func TestSQLiteStoreSavesAndLoadsRun(t *testing.T) {
 	store, err := OpenSQLite(filepath.Join(t.TempDir(), "ahc-plaza", "ahc-plaza.db"))
 	if err != nil {

@@ -66,29 +66,44 @@ type Pair struct {
 }
 
 type Comparison struct {
-	CaseCount         int     `json:"case_count"`
-	MeanA             float64 `json:"mean_a"`
-	MeanB             float64 `json:"mean_b"`
-	MeanImprovement   float64 `json:"mean_improvement"`
-	MedianImprovement float64 `json:"median_improvement"`
-	ImprovementRate   float64 `json:"improvement_rate"`
-	PValue            float64 `json:"p_value"`
-	ConfidenceLevel   float64 `json:"confidence_level"`
-	ConfidenceLow     float64 `json:"confidence_low"`
-	ConfidenceHigh    float64 `json:"confidence_high"`
-	EffectSize        float64 `json:"effect_size"`
-	Significant       bool    `json:"significant"`
-	Pairs             []Pair  `json:"pairs,omitempty"`
+	CaseCount          int      `json:"case_count"`
+	MeanA              float64  `json:"mean_a"`
+	MeanB              float64  `json:"mean_b"`
+	MeanImprovement    float64  `json:"mean_improvement"`
+	MedianImprovement  float64  `json:"median_improvement"`
+	ImprovementRate    float64  `json:"improvement_rate"`
+	StatisticalMethod  string   `json:"statistical_method"`
+	InferenceAvailable bool     `json:"inference_available"`
+	InferenceNote      string   `json:"inference_note,omitempty"`
+	PValue             *float64 `json:"p_value"`
+	ConfidenceLevel    float64  `json:"confidence_level"`
+	ConfidenceLow      *float64 `json:"confidence_low"`
+	ConfidenceHigh     *float64 `json:"confidence_high"`
+	EffectSize         float64  `json:"effect_size"`
+	Significant        bool     `json:"significant"`
+	Pairs              []Pair   `json:"pairs,omitempty"`
 }
 
-// FilterInvalid は、設定に応じてWrong Answerのケースを統計対象から除外します。
+const (
+	bootstrapTMethod                    = "paired_bootstrap_t"
+	minimumValidBootstrapFraction       = 0.9
+	minimumValidBootstrapReplicateCount = 2
+)
+
+type bootstrapTResult struct {
+	PValue float64
+	Low    float64
+	High   float64
+}
+
+// FilterInvalid は、設定に応じてWAとTLEのケースを統計対象から除外します。
 func FilterInvalid(results []domain.CaseResult, includeInvalid bool) []domain.CaseResult {
 	if includeInvalid {
 		return results
 	}
 	filtered := make([]domain.CaseResult, 0, len(results))
 	for _, result := range results {
-		if result.Status != "wa" {
+		if result.Status != "wa" && result.Status != "tle" {
 			filtered = append(filtered, result)
 		}
 	}
@@ -150,11 +165,27 @@ func Compare(a, b []domain.CaseResult, objective string, confidenceLevel float64
 		valuesB[index] = pair.B
 		differences[index] = pair.Difference
 	}
-	summaryA, _ := Summarize(valuesA)
-	summaryB, _ := Summarize(valuesB)
-	summaryDifference, _ := Summarize(differences)
-	pValue := pairedPermutationPValue(differences, bootstrapIterations, randomSeed)
-	low, high := bootstrapMeanInterval(differences, confidenceLevel, bootstrapIterations, randomSeed+1)
+	summaryA, err := Summarize(valuesA)
+	if err != nil {
+		return Comparison{}, fmt.Errorf("Run Aの統計を計算できません: %w", err)
+	}
+	summaryB, err := Summarize(valuesB)
+	if err != nil {
+		return Comparison{}, fmt.Errorf("Run Bの統計を計算できません: %w", err)
+	}
+	summaryDifference, err := Summarize(differences)
+	if err != nil {
+		return Comparison{}, fmt.Errorf("スコア差の統計を計算できません: %w", err)
+	}
+	bootstrapResult, inferenceNote := bootstrapTMean(differences, confidenceLevel, bootstrapIterations, randomSeed)
+	var pValue, low, high *float64
+	significant := false
+	if inferenceNote == "" {
+		pValue = &bootstrapResult.PValue
+		low = &bootstrapResult.Low
+		high = &bootstrapResult.High
+		significant = bootstrapResult.Low > 0 || bootstrapResult.High < 0
+	}
 	improvementRate := 0.0
 	if summaryB.Mean != 0 {
 		improvementRate = summaryDifference.Mean / math.Abs(summaryB.Mean)
@@ -164,19 +195,22 @@ func Compare(a, b []domain.CaseResult, objective string, confidenceLevel float64
 		effectSize = summaryDifference.Mean / summaryDifference.StdDev
 	}
 	return Comparison{
-		CaseCount:         len(pairs),
-		MeanA:             summaryA.Mean,
-		MeanB:             summaryB.Mean,
-		MeanImprovement:   summaryDifference.Mean,
-		MedianImprovement: summaryDifference.Median,
-		ImprovementRate:   improvementRate,
-		PValue:            pValue,
-		ConfidenceLevel:   confidenceLevel,
-		ConfidenceLow:     low,
-		ConfidenceHigh:    high,
-		EffectSize:        effectSize,
-		Significant:       pValue < 1-confidenceLevel,
-		Pairs:             pairs,
+		CaseCount:          len(pairs),
+		MeanA:              summaryA.Mean,
+		MeanB:              summaryB.Mean,
+		MeanImprovement:    summaryDifference.Mean,
+		MedianImprovement:  summaryDifference.Median,
+		ImprovementRate:    improvementRate,
+		StatisticalMethod:  bootstrapTMethod,
+		InferenceAvailable: inferenceNote == "",
+		InferenceNote:      inferenceNote,
+		PValue:             pValue,
+		ConfidenceLevel:    confidenceLevel,
+		ConfidenceLow:      low,
+		ConfidenceHigh:     high,
+		EffectSize:         effectSize,
+		Significant:        significant,
+		Pairs:              pairs,
 	}, nil
 }
 
@@ -201,60 +235,92 @@ func pairResults(a, b []domain.CaseResult, objective string) []Pair {
 	return result
 }
 
-func pairedPermutationPValue(differences []float64, iterations int, seed int64) float64 {
-	observed := math.Abs(mean(differences))
-	if observed == 0 {
-		return 1
+// bootstrapTMean は、対応のある差分の平均についてbootstrap-t信頼区間と両側p値を計算します。
+func bootstrapTMean(values []float64, confidenceLevel float64, iterations int, seed int64) (bootstrapTResult, string) {
+	if len(values) < 2 {
+		return bootstrapTResult{}, "信頼区間の計算には2ケース以上必要です"
 	}
-	if len(differences) <= 16 {
-		permutations := 1 << len(differences)
-		greaterOrEqual := 0
-		for mask := 0; mask < permutations; mask++ {
-			var sum float64
-			for index, difference := range differences {
-				if mask&(1<<index) != 0 {
-					sum += difference
-				} else {
-					sum -= difference
-				}
-			}
-			if math.Abs(sum/float64(len(differences))) >= observed {
-				greaterOrEqual++
-			}
-		}
-		return float64(greaterOrEqual) / float64(permutations)
+	observedMean, observedStdDev := meanAndSampleStdDev(values)
+	observedStandardError := observedStdDev / math.Sqrt(float64(len(values)))
+	if observedStandardError == 0 || math.IsNaN(observedStandardError) || math.IsInf(observedStandardError, 0) {
+		return bootstrapTResult{}, "ケース間のスコア差に分散がないため信頼区間を計算できません"
 	}
+
 	random := rand.New(rand.NewSource(seed))
-	greaterOrEqual := 0
+	tStatistics := make([]float64, 0, iterations)
 	for iteration := 0; iteration < iterations; iteration++ {
-		var sum float64
-		for _, difference := range differences {
-			if random.Intn(2) == 0 {
-				sum += difference
-			} else {
-				sum -= difference
-			}
+		resampledMean := 0.0
+		resampledSquaredDifferenceSum := 0.0
+		for index := 0; index < len(values); index++ {
+			value := values[random.Intn(len(values))]
+			count := float64(index + 1)
+			difference := value - resampledMean
+			resampledMean += difference / count
+			resampledSquaredDifferenceSum += difference * (value - resampledMean)
 		}
-		if math.Abs(sum/float64(len(differences))) >= observed {
-			greaterOrEqual++
+		resampledVariance := resampledSquaredDifferenceSum / float64(len(values)-1)
+		if resampledVariance < 0 {
+			resampledVariance = 0
+		}
+		resampledStdDev := math.Sqrt(resampledVariance)
+		resampledStandardError := resampledStdDev / math.Sqrt(float64(len(values)))
+		if resampledStandardError == 0 || math.IsNaN(resampledStandardError) || math.IsInf(resampledStandardError, 0) {
+			continue
+		}
+		tStatistic := (resampledMean - observedMean) / resampledStandardError
+		if !math.IsNaN(tStatistic) && !math.IsInf(tStatistic, 0) {
+			tStatistics = append(tStatistics, tStatistic)
 		}
 	}
-	return float64(greaterOrEqual+1) / float64(iterations+1)
+	minimumValidCount := int(math.Ceil(float64(iterations) * minimumValidBootstrapFraction))
+	if minimumValidCount < minimumValidBootstrapReplicateCount {
+		minimumValidCount = minimumValidBootstrapReplicateCount
+	}
+	if len(tStatistics) < minimumValidCount {
+		return bootstrapTResult{}, "分散を計算できない再標本が多いため信頼区間を計算できません"
+	}
+
+	sort.Float64s(tStatistics)
+	alpha := (1 - confidenceLevel) / 2
+	lowerT := quantile(tStatistics, alpha)
+	upperT := quantile(tStatistics, 1-alpha)
+	low := observedMean - upperT*observedStandardError
+	high := observedMean - lowerT*observedStandardError
+	if math.IsNaN(low) || math.IsInf(low, 0) || math.IsNaN(high) || math.IsInf(high, 0) {
+		return bootstrapTResult{}, "信頼区間が有限値にならないため計算できません"
+	}
+
+	observedT := observedMean / observedStandardError
+	lowerTailCount := sort.Search(len(tStatistics), func(index int) bool {
+		return tStatistics[index] > observedT
+	})
+	upperTailCount := len(tStatistics) - sort.SearchFloat64s(tStatistics, observedT)
+	lowerTailProbability := float64(lowerTailCount+1) / float64(len(tStatistics)+1)
+	upperTailProbability := float64(upperTailCount+1) / float64(len(tStatistics)+1)
+	pValue := 2 * math.Min(lowerTailProbability, upperTailProbability)
+	if pValue > 1 {
+		pValue = 1
+	}
+	return bootstrapTResult{PValue: pValue, Low: low, High: high}, ""
 }
 
-func bootstrapMeanInterval(values []float64, confidenceLevel float64, iterations int, seed int64) (float64, float64) {
-	random := rand.New(rand.NewSource(seed))
-	means := make([]float64, iterations)
-	for iteration := range means {
-		var sum float64
-		for index := 0; index < len(values); index++ {
-			sum += values[random.Intn(len(values))]
-		}
-		means[iteration] = sum / float64(len(values))
+func meanAndSampleStdDev(values []float64) (float64, float64) {
+	currentMean := 0.0
+	squaredDifferenceSum := 0.0
+	for index, value := range values {
+		count := float64(index + 1)
+		difference := value - currentMean
+		currentMean += difference / count
+		squaredDifferenceSum += difference * (value - currentMean)
 	}
-	sort.Float64s(means)
-	alpha := (1 - confidenceLevel) / 2
-	return quantile(means, alpha), quantile(means, 1-alpha)
+	if len(values) < 2 {
+		return currentMean, 0
+	}
+	variance := squaredDifferenceSum / float64(len(values)-1)
+	if variance < 0 {
+		variance = 0
+	}
+	return currentMean, math.Sqrt(variance)
 }
 
 func quantile(ordered []float64, probability float64) float64 {

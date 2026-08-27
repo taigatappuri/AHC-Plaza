@@ -47,9 +47,15 @@
   const conditionText = (result: Comparison) => result.filter.conditions
     .map((condition) => `${condition.feature} ${condition.operator} ${condition.value}`)
     .join(' AND ')
-  const verdict = (result: Comparison) => !result.significant
-    ? '有意差なし'
-    : result.confidence_high < 0 ? 'Run B優位' : result.confidence_low > 0 ? 'Run A優位' : '有意差あり'
+  const verdict = (result: Comparison) => !result.inference_available
+    ? '判定不能'
+    : !result.significant
+      ? '差の検出なし'
+      : result.confidence_high !== null && result.confidence_high < 0
+        ? 'Run B優位'
+        : result.confidence_low !== null && result.confidence_low > 0 ? 'Run A優位' : '差を検出'
+  const isRunAVerdict = (result: Comparison) => result.significant && result.confidence_low !== null && result.confidence_low > 0
+  const isRunBVerdict = (result: Comparison) => result.significant && result.confidence_high !== null && result.confidence_high < 0
   const signedScore = (value: number) => `${value > 0 ? '+' : ''}${formatScore(value)}`
   const signedPercent = (value: number) => `${value > 0 ? '+' : ''}${(value * 100).toFixed(2)}%`
   const differenceLabel = () => objective === 'max' ? 'A − B' : 'B − A'
@@ -164,11 +170,15 @@
     <div class="comparison-result">
       <header class="result-lead">
         <div><span>{differenceLabel()}</span><strong>{signedScore(comparison.mean_improvement)}</strong><em>{signedPercent(comparison.improvement_rate)}</em></div>
-        <span class:run-a-verdict={comparison.significant && comparison.confidence_low > 0} class:run-b-verdict={comparison.significant && comparison.confidence_high < 0} class="verdict">{verdict(comparison)}</span>
+        <span class:run-a-verdict={isRunAVerdict(comparison)} class:run-b-verdict={isRunBVerdict(comparison)} class="verdict">{verdict(comparison)}</span>
       </header>
       <div class="result-evidence">
-        <span>{Math.round(comparison.confidence_level * 100)}%信頼区間 {signedScore(comparison.confidence_low)} ～ {signedScore(comparison.confidence_high)}</span>
-        <span>{pValue(comparison.p_value)}</span>
+        {#if comparison.inference_available && comparison.confidence_low !== null && comparison.confidence_high !== null && comparison.p_value !== null}
+          <span>{Math.round(comparison.confidence_level * 100)}% bootstrap-t信頼区間 {signedScore(comparison.confidence_low)} ～ {signedScore(comparison.confidence_high)}</span>
+          <span>{pValue(comparison.p_value)}</span>
+        {:else}
+          <span>{comparison.inference_note ?? 'bootstrap-t信頼区間を計算できません'}</span>
+        {/if}
         <span>{comparison.filter.matched_case_count} / {comparison.filter.original_case_count}ケース</span>
       </div>
       {#if comparison.filter.active}<code>{conditionText(comparison)}</code>{/if}

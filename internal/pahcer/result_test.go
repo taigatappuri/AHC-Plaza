@@ -27,3 +27,14 @@ func TestLoadLatestResult(t *testing.T) {
 		t.Fatalf("duration = %dms", got)
 	}
 }
+
+func TestResultCaseTimedOut(t *testing.T) {
+	timeout := ResultCase{ErrorMessage: `Failed to run (exit status: 124). command: "ahc-plaza" "case-exec"`}
+	if !timeout.TimedOut() {
+		t.Fatal("タイムアウト用終了コードをTLEとして検出できませんでした")
+	}
+	failed := ResultCase{ErrorMessage: `Failed to run (exit status: 1). command: "ahc-plaza" "case-exec"`}
+	if failed.TimedOut() {
+		t.Fatal("通常の実行エラーをTLEとして検出しました")
+	}
+}

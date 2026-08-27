@@ -277,7 +277,7 @@ func applyDefaults(file *FileConfig) {
 		file.Execution.TimeoutMilliseconds = *file.Execution.LegacyTimeoutSeconds * 1000
 	}
 	file.Execution.LegacyTimeoutSeconds = nil
-	setDefault(&file.Execution.TimeoutMilliseconds, 300000)
+	setDefault(&file.Execution.TimeoutMilliseconds, 2000)
 	setDefault(&file.Pahcer.SettingFile, "pahcer_config.toml")
 	setDefault(&file.Statistics.ConfidenceLevel, 0.95)
 	setDefault(&file.Statistics.BootstrapIterations, 10000)

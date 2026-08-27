@@ -64,6 +64,8 @@ func execute(args []string) error {
 		return executeRun(args[1:])
 	case "gui":
 		return executeGUI(args[1:])
+	case "update":
+		return executeUpdate(args[1:])
 	case "uninstall":
 		return executeUninstall(args[1:])
 	default:
@@ -263,6 +265,7 @@ func printUsage() {
   ahc-plaza doctor
   ahc-plaza run [OPTIONS]
   ahc-plaza gui [OPTIONS]
+  ahc-plaza update
   ahc-plaza uninstall [--install-dir <DIR>]
   ahc-plaza --version`)
 }

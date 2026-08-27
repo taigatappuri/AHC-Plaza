@@ -26,8 +26,8 @@ objective = "max"
 	if config.File.Execution.DefaultInputDir != "ahc-plaza/inputs" {
 		t.Fatalf("input dir = %q, want ahc-plaza/inputs", config.File.Execution.DefaultInputDir)
 	}
-	if config.File.Execution.TimeoutMilliseconds != 300000 {
-		t.Fatalf("timeout = %d, want 300000", config.File.Execution.TimeoutMilliseconds)
+	if config.File.Execution.TimeoutMilliseconds != 2000 {
+		t.Fatalf("timeout = %d, want 2000", config.File.Execution.TimeoutMilliseconds)
 	}
 	if config.File.Statistics.ConfidenceLevel != 0.95 {
 		t.Fatalf("confidence = %v, want 0.95", config.File.Statistics.ConfidenceLevel)

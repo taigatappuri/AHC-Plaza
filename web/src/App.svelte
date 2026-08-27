@@ -60,7 +60,7 @@
   let inputGenerationResult: InputGenerateResult | null = null
   let inputGenerating = false
   let threads = 0
-  let timeoutMilliseconds = 300000
+  let timeoutMilliseconds = 2000
   let comment = ''
   let compareA = ''
   let compareB = ''

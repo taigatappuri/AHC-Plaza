@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,11 @@ type ResultCase struct {
 type ResultFile struct {
 	WrongAnswerSeeds []uint64     `json:"wa_seeds"`
 	Cases            []ResultCase `json:"cases"`
+}
+
+// TimedOut はケース実行ラッパーが返すタイムアウト用の終了コードを判定します。
+func (r ResultCase) TimedOut() bool {
+	return strings.Contains(r.ErrorMessage, "(exit status: 124)")
 }
 
 func LoadLatestResult(workspaceDir string) (ResultFile, error) {

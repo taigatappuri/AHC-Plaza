@@ -11,7 +11,7 @@
   export let onRefreshInputDirectories: () => void = () => {}
   export let inputDir = ''
   export let threads = 0
-  export let timeoutMilliseconds = 300000
+  export let timeoutMilliseconds = 2000
   export let comment = ''
   export let loading = false
   export let defaultsAvailable = false

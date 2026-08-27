@@ -23,5 +23,7 @@ export const statusLabel = (status: string) => ({
   queued: '待機中',
   failed: '失敗',
   cancelled: '停止',
-  partial: '一部完了'
+  partial: '一部完了',
+  wa: 'WA',
+  tle: 'TLE'
 }[status] ?? status)

@@ -148,10 +148,13 @@ export type Comparison = {
   mean_b: number
   mean_improvement: number
   improvement_rate: number
-  p_value: number
+  statistical_method: 'paired_bootstrap_t'
+  inference_available: boolean
+  inference_note?: string
+  p_value: number | null
   confidence_level: number
-  confidence_low: number
-  confidence_high: number
+  confidence_low: number | null
+  confidence_high: number | null
   significant: boolean
   filter: ComparisonFilter
   pairs: ComparisonPair[]

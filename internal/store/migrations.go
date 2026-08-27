@@ -97,7 +97,15 @@ ON CONFLICT(name) DO UPDATE SET next_number = MAX(next_number, excluded.next_num
 	if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_run_number ON runs(run_number) WHERE run_number IS NOT NULL`); err != nil {
 		return fmt.Errorf("could not create the Run sequence index: %w", err)
 	}
-	return s.ensureColumn(ctx, "cases", "seed", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.ensureColumn(ctx, "cases", "seed", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE cases SET status = 'tle'
+WHERE status = 'wa' AND instr(error_message, '(exit status: 124)') > 0`); err != nil {
+		return fmt.Errorf("could not migrate timed-out case statuses: %w", err)
+	}
+	return nil
 }
 
 func (s *SQLiteStore) ensureColumn(ctx context.Context, table, column, definition string) error {

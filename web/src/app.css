@@ -113,7 +113,7 @@ select { cursor: pointer; }
 .case-panel-hint { margin: 0; font-size: 11px; }
 .case-status { font: 11px var(--mono); }
 .case-status.succeeded { color: var(--pass); }
-.case-status.failed { color: var(--failure); }
+.case-status.wa, .case-status.tle, .case-status.failed { color: var(--failure); }
 
 .copy-action { padding: 6px 9px; color: var(--graphite-soft); background: var(--paper-shade); border: 1px solid var(--rule-strong); border-radius: 4px; font-size: 11px; }
 .copy-action.copied { color: var(--pass); border-color: var(--pass); }
