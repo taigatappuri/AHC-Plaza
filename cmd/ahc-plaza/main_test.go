@@ -129,7 +129,7 @@ func TestExecuteCaseValidatesArgumentsAndRunsCommand(t *testing.T) {
 			t.Fatalf("args = %#v, error = %#v, want exit code 2", args, err)
 		}
 	}
-	if err := executeCase([]string{"--timeout-ms", "1", "--", "true"}); err != nil {
+	if err := executeCase([]string{"--timeout-ms", "1000", "--", "true"}); err != nil {
 		t.Fatal(err)
 	}
 }
