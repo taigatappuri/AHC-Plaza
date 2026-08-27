@@ -1,6 +1,7 @@
 # AHC Plaza
 
-AHC Plaza は[pahcer](https://github.com/terry-u16/pahcer) と連携して AtCoder Heuristic Contest（AHC）の C++ ソースファイル実行、結果保存、比較・分析をローカルでまとめて扱うためのブラウザで動作するGUIツールです。
+AHC Plaza は [pahcer](https://github.com/terry-u16/pahcer) と連携して AtCoder Heuristic Contest（AHC）の C++ ソースファイル実行、結果保存、比較・分析をローカルでまとめて扱うためのブラウザで動作するGUIツールです。
+
 詳しい使い方は[AHC Plazaの使い方](https://taigatappuri.net/blog/ahc-plaza/)をご参照ください。
 
 ## 主な機能
