@@ -1,6 +1,6 @@
 # AHC Plaza
 
-AHC Plaza は、[pahcer](https://github.com/terry-u16/pahcer) と連携して AtCoder Heuristic Contest（AHC）の C++ ソースファイル実行、結果保存、比較・分析をローカルでまとめて扱うためのブラウザで動作するGUIツールです。
+AHC Plaza は[pahcer](https://github.com/terry-u16/pahcer) と連携して AtCoder Heuristic Contest（AHC）の C++ ソースファイル実行、結果保存、比較・分析をローカルでまとめて扱うためのブラウザで動作するGUIツールです。
 詳しい使い方は[AHC Plazaの使い方](https://taigatappuri.net/blog/ahc-plaza/)をご参照ください。
 
 ## 主な機能
@@ -10,7 +10,6 @@ AHC Plaza は、[pahcer](https://github.com/terry-u16/pahcer) と連携して At
 - ソースファイル実行とソーススナップショット保存
 - ケースごとのスコア・実行時間・ログの確認
 - 実行間の統計比較と入力条件による絞り込み
-- 特徴量による比較・分析
 
 ### 実行と履歴の確認
 
@@ -24,13 +23,13 @@ AHC Plaza は、[pahcer](https://github.com/terry-u16/pahcer) と連携して At
 
 ![2つの実行結果のスコアと分布を比較した AHC Plaza の画面](./images/compare_demo.png)
 
+
 ## 対応環境
 
 - Linux（amd64 / arm64）
-- C++20をコンパイルできる`g++`
+- `g++`
 - Rust / Cargo
 - [pahcer](https://github.com/terry-u16/pahcer)
-- Rustソース版のAtCoder公式ローカルテスト環境
 
 ## インストール
 
@@ -45,6 +44,11 @@ curl -fsSL https://github.com/taigatappuri/AHC-Plaza/releases/latest/download/in
 ```sh
 curl -fsSL https://github.com/taigatappuri/AHC-Plaza/releases/latest/download/install.sh \
   | AHC_PLAZA_INSTALL_DIR=/path/to/bin sh
+```
+
+インストール完了後、以下のコマンドでバージョンが適切に出力されることをご確認ください。
+```
+ahc-plaza --version
 ```
 
 ## 更新
@@ -80,13 +84,17 @@ AHC プロジェクトのルートで pahcer と AHC-Plaza を初期化します
 
 ### pahcer の初期化
 ```sh
-pahcer init --problem <PROBLEM_NAME> --objective <OBJECTIVE> --lang <LANGUAGE>
+pahcer init --problem <PROBLEM_NAME> --objective <OBJECTIVE> --lang cpp
 ```
 ### AHC Plaza の初期化
 ```sh
 ahc-plaza init --problem <PROBLEM_NAME> --objective <OBJECTIVE>
 ahc-plaza doctor
 ```
+
+`<OBJECTIVE>`には pahcer 同様、目標がスコアの最大化か最小化に合わせて指定してください。
+- max: スコアが大きい方が良い
+- min: スコアが小さい方が良い
 
 初期化後のディレクトリ構成は次のようになります。
 ```text
