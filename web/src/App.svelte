@@ -7,6 +7,7 @@
   import RunDetail from './components/RunDetail.svelte'
   import RunTable from './components/RunTable.svelte'
   import SettingsPage from './components/SettingsPage.svelte'
+  import TuningPage from './components/TuningPage.svelte'
   import { errorMessage, requestJSON, requestText } from './lib/api'
   import { shortId, statusLabel } from './lib/formatters'
   import type { CaseResult, Comparison, ConfigData, InputGenerateRequest, InputGenerateResult, InputGenerator, InputFeatureDefinition, Run, RunStatistics, Tab, TabDefinition, FeatureCondition, FeatureData } from './lib/types'
@@ -33,6 +34,7 @@
   let activeTab: Tab = 'overview'
   let runs: Run[] = []
   let runsRefreshing = false
+  let includeTuning = false
   let selectedRun: Run | null = null
   let caseResults: CaseResult[] = []
   let runStatistics: RunStatistics | null = null
@@ -74,6 +76,7 @@
     { id: 'overview', label: '実行', hint: '実行を開始' },
     { id: 'detail', label: '履歴', hint: 'Runの履歴を確認' },
     { id: 'compare', label: '比較', hint: 'Runを比較' },
+    { id: 'tuning', label: 'チューニング', hint: 'Optunaで定数を調整' },
     { id: 'input', label: '入力', hint: '入力ケースを生成' },
     { id: 'settings', label: '設定', hint: 'プロジェクト設定を変更' }
   ]
@@ -83,6 +86,7 @@
     detail: showingRunDetail ? '実行の詳細' : '履歴',
     compare: '比較',
     input: '入力生成',
+    tuning: 'チューニング',
     settings: '設定'
   })[activeTab]
 
@@ -92,7 +96,7 @@
   ] : []
 
   async function loadRuns() {
-    runs = await requestJSON<Run[]>('/api/runs')
+    runs = await requestJSON<Run[]>(`/api/runs?include_tuning=${includeTuning}`)
     if (!compareA && runs[0]) compareA = runs[0].id
     if (!compareB && runs[1]) compareB = runs[1].id
     if (selectedRun) {
@@ -101,6 +105,19 @@
     }
   }
 
+  async function openTuningRun(id: string) {
+    try { const response = await requestJSON<{run: Run}>(`/api/runs/${encodeURIComponent(id)}`); await openRunDetail(response.run) }
+    catch (error) { message = errorMessage(error) }
+  }
+  async function compareTuningRuns(a: string, b: string) {
+    try {
+      includeTuning = true
+      await loadRuns()
+      for (const id of [a, b]) if (!runs.some(run => run.id === id)) { const response = await requestJSON<{run: Run}>(`/api/runs/${encodeURIComponent(id)}`); runs = [...runs, response.run] }
+      compareA = a; compareB = b; activeTab = 'compare'
+      await compareRuns(a, b)
+    } catch (error) { message = errorMessage(error) }
+  }
   async function refreshRuns() {
     if (runsRefreshing) return
     runsRefreshing = true
@@ -363,12 +380,15 @@
           <RunTable runs={runs.slice(0, 5)} selectedRunId={selectedRun?.id ?? ''} compact onSelect={openRunDetail} />
         </section>
 
+      {:else if activeTab === 'tuning'}
+        <TuningPage {solvers} {inputDirectories} objective={configData?.project.objective ?? 'max'} onOpenRun={openTuningRun} onCompare={compareTuningRuns} />
       {:else if activeTab === 'input'}
         <InputCreatePage generators={inputGenerators} {inputGeneratorLoading} error={inputGeneratorError} result={inputGenerationResult} defaultOutputDir={configData?.execution.default_input_dir ?? 'ahc-plaza/inputs'} loading={inputGenerating} onGenerate={generateInputCases} />
       {:else if activeTab === 'detail'}
         {#if showingRunDetail}
           <RunDetail {selectedRun} {caseResults} {runStatistics} {featureData} {source} {logs} {runError} onCancel={cancelRun} onBack={() => showingRunDetail = false} onUpdateComment={updateRunComment} onConfigureInputFormat={configureInputFormat} />
         {:else}
+          <label><input type="checkbox" bind:checked={includeTuning} onchange={refreshRuns} /> チューニングを含む</label>
           <RunTable bind:query={runQuery} {runs} selectedRunId={selectedRun?.id ?? ''} onSelect={openRunDetail} />
         {/if}
       {:else if activeTab === 'compare'}

@@ -441,6 +441,12 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request, runID stri
 }
 
 func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request, runID string) {
+	if run, err := s.Store.GetRun(r.Context(), runID); err == nil && run.TuningStudy != "" && (run.Status == domain.RunRunning || run.Status == domain.RunQueued) {
+		if !writeErrorIf(w, http.StatusConflict, s.Tuning.Pause(run.TuningStudy, true)) {
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping"})
+		}
+		return
+	}
 	s.mu.Lock()
 	cancel, ok := s.cancels[runID]
 	s.mu.Unlock()

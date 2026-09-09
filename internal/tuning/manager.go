@@ -25,6 +25,8 @@ import (
 	"github.com/taigatappuri/AHC-Plaza/internal/usecase"
 )
 
+var ErrSourceChanged = errors.New("ソースが変更されています。再検出してください")
+
 type StartRequest struct {
 	Solver     string             `json:"solver"`
 	InputDir   string             `json:"input_dir"`
@@ -37,16 +39,20 @@ type StartRequest struct {
 	Seed       int                `json:"seed"`
 }
 type Manifest struct {
-	Version      int                 `json:"version"`
-	WorkerHash   string              `json:"worker_hash"`
-	RuntimeHash  string              `json:"runtime_hash"`
-	PlazaVersion string              `json:"plaza_version"`
-	Prepared     usecase.PreparedRun `json:"prepared"`
-	Request      StartRequest        `json:"request"`
-	SourceHash   string              `json:"source_hash"`
-	Parameters   []params.Parameter  `json:"parameters"`
-	Files        map[string]string   `json:"files"`
-	Tools        map[string]string   `json:"tools"`
+	Python           string              `json:"python"`
+	Optuna           string              `json:"optuna"`
+	ParserVersion    int                 `json:"parser_version"`
+	ObjectiveVersion string              `json:"objective_version"`
+	Version          int                 `json:"version"`
+	WorkerHash       string              `json:"worker_hash"`
+	RuntimeHash      string              `json:"runtime_hash"`
+	PlazaVersion     string              `json:"plaza_version"`
+	Prepared         usecase.PreparedRun `json:"prepared"`
+	Request          StartRequest        `json:"request"`
+	SourceHash       string              `json:"source_hash"`
+	Parameters       []params.Parameter  `json:"parameters"`
+	Files            map[string]string   `json:"files"`
+	Tools            map[string]string   `json:"tools"`
 }
 type activity struct {
 	cancel       context.CancelFunc
@@ -87,7 +93,13 @@ func (m *Manager) save(s *domain.TuningStudy) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	s.UpdatedAt = time.Now().UTC()
-	return m.Store.SaveStudy(ctx, *s)
+	err := m.Store.SaveStudy(ctx, *s)
+	if err == nil {
+		m.mu.Lock()
+		delete(m.usageCache, s.ID)
+		m.mu.Unlock()
+	}
+	return err
 }
 func (m *Manager) dir(id string) (string, error) {
 	if id == "" || !filepath.IsLocal(id) || strings.ContainsAny(id, "/\\") || strings.HasPrefix(id, ".") {
@@ -139,7 +151,7 @@ func (m *Manager) Start(ctx context.Context, r StartRequest) (domain.TuningStudy
 		return s, e
 	}
 	if scan.Hash != r.SourceHash {
-		return s, fmt.Errorf("ソースが変更されています。再検出してください")
+		return s, ErrSourceChanged
 	}
 	ps, e := params.Resolve(scan, r.Parameters)
 	if e != nil {
@@ -183,9 +195,13 @@ func (m *Manager) Start(ctx context.Context, r StartRequest) (domain.TuningStudy
 	if e != nil {
 		return s, e
 	}
-	p.CompilerVersion = tools["g++"]
+	for program, version := range tools {
+		if filepath.Base(program) == "g++" {
+			p.CompilerVersion = version
+		}
+	}
 	p.PahcerVersion = tools["pahcer"]
-	manifest := Manifest{Version: 1, WorkerHash: workerHash(), RuntimeHash: info.SHA256, PlazaVersion: m.Version, Prepared: p, Request: r, SourceHash: scan.Hash, Parameters: ps, Files: files, Tools: tools}
+	manifest := Manifest{Python: info.Python, Optuna: info.Optuna, ParserVersion: params.Version, ObjectiveVersion: "raw-mean-v1", Version: 1, WorkerHash: workerHash(), RuntimeHash: info.SHA256, PlazaVersion: m.Version, Prepared: p, Request: r, SourceHash: scan.Hash, Parameters: ps, Files: files, Tools: tools}
 	b, e := json.MarshalIndent(manifest, "", "  ")
 	if e != nil {
 		return s, e
@@ -254,7 +270,7 @@ func (m *Manager) Resume(ctx context.Context, id string, additional int) (domain
 	return s, m.launch(s, v)
 }
 func (m *Manager) verify(ctx context.Context, s domain.TuningStudy, v Manifest) error {
-	if v.Version != 1 || v.WorkerHash != workerHash() || v.RuntimeHash != bundled.Status(m.Root).SHA256 || v.PlazaVersion != m.Version {
+	if v.Version != 1 || v.ParserVersion != params.Version || v.ObjectiveVersion != "raw-mean-v1" || v.WorkerHash != workerHash() || v.RuntimeHash != bundled.Status(m.Root).SHA256 || v.PlazaVersion != m.Version {
 		return fmt.Errorf("Plazaまたは同梱環境の版が変わっています。環境を復元するか新しいStudyを作成してください")
 	}
 	dir, _ := m.dir(s.ID)
@@ -369,7 +385,7 @@ func (m *Manager) run(ctx context.Context, a *activity, s *domain.TuningStudy, v
 		fail(e)
 		return
 	}
-	// Reconcile saved results before creating another candidate.
+	// 新しい候補の取得前に保存済み結果とOptunaを照合します。
 	trials, e := m.Store.Trials(ctx, s.ID, 0, 10000)
 	if e != nil {
 		fail(e)
@@ -501,6 +517,10 @@ func (m *Manager) run(ctx context.Context, a *activity, s *domain.TuningStudy, v
 		source, _ := os.ReadFile(filepath.Join(dir, "fixed", "original.cpp"))
 		_, t.Actual, e = params.Generate(source, v.SourceHash, v.Parameters, t.Params)
 		if e != nil {
+			fail(e)
+			return
+		}
+		if e = m.Store.SaveTrial(ctx, t); e != nil {
 			fail(e)
 			return
 		}
@@ -716,13 +736,35 @@ func inspectTools(ctx context.Context, setting string) (map[string]string, error
 		return nil, e
 	}
 	found := false
+	outputs := map[string]bool{}
 	programs := map[string]bool{"pahcer": true}
 	for _, step := range compile {
+		if filepath.Base(step.Program) == "cargo" && filepath.Clean(step.CurrentDir) == "tools" && len(step.Args) > 0 && step.Args[0] == "build" {
+			for _, arg := range step.Args {
+				if filepath.IsAbs(arg) || strings.HasPrefix(arg, "../") || strings.HasPrefix(arg, "--manifest-path") || strings.HasPrefix(arg, "--target-dir") {
+					return nil, fmt.Errorf("Cargoビルドは固定したtools内に限定してください")
+				}
+			}
+			programs[step.Program] = true
+			continue
+		}
 		if filepath.Base(step.Program) != "g++" {
 			return nil, fmt.Errorf("初版のビルドはg++による単一main.cppだけに対応します")
 		}
 		main := false
-		for _, arg := range step.Args {
+		output := "a.out"
+		for index, arg := range step.Args {
+			if filepath.IsAbs(arg) || strings.HasPrefix(arg, "../") || strings.HasPrefix(arg, "-I") || strings.HasPrefix(arg, "-include") || strings.HasPrefix(arg, "-imacros") || strings.HasPrefix(arg, "@") {
+				return nil, fmt.Errorf("外部ソース・ヘッダーを参照するビルド引数には対応しません: %s", arg)
+			}
+			if arg == "-o" {
+				if index+1 >= len(step.Args) {
+					return nil, fmt.Errorf("-oの出力先がありません")
+				}
+				output = filepath.Clean(step.Args[index+1])
+			} else if strings.HasPrefix(arg, "-o") && len(arg) > 2 {
+				output = filepath.Clean(arg[2:])
+			}
 			if arg == "main.cpp" || arg == "./main.cpp" {
 				main = true
 			}
@@ -733,13 +775,48 @@ func inspectTools(ctx context.Context, setting string) (map[string]string, error
 		if !main || step.CurrentDir != "" && step.CurrentDir != "." {
 			return nil, fmt.Errorf("workspaceのmain.cppをビルドしてください")
 		}
+		if !filepath.IsLocal(output) || output == "main.cpp" {
+			return nil, fmt.Errorf("ビルド出力先が不正です")
+		}
+		outputs[output] = true
 		found = true
 		programs[step.Program] = true
 	}
 	if !found {
 		return nil, fmt.Errorf("g++でmain.cppをビルドするcompile_stepsが必要です")
 	}
-	// Cargo influences testers/visualizers when present, so record it too.
+	steps = test["test_steps"]
+	if steps == nil {
+		steps = cfg["test_steps"]
+	}
+	b, _ = json.Marshal(steps)
+	var evaluation []struct {
+		Program    string   `json:"program"`
+		Args       []string `json:"args"`
+		CurrentDir string   `json:"current_dir"`
+	}
+	if e := json.Unmarshal(b, &evaluation); e != nil {
+		return nil, e
+	}
+	usesBuilt := false
+	for _, step := range evaluation {
+		base := step.CurrentDir
+		if base == "" {
+			base = "."
+		}
+		if filepath.IsAbs(base) || !filepath.IsLocal(base) {
+			return nil, fmt.Errorf("test_stepsの作業場所はworkspace内にしてください")
+		}
+		for _, arg := range append([]string{step.Program}, step.Args...) {
+			if outputs[filepath.Clean(filepath.Join(base, arg))] {
+				usesBuilt = true
+			}
+		}
+	}
+	if !usesBuilt {
+		return nil, fmt.Errorf("test_stepsは生成した実行ファイルを直接またはテスターの引数として実行してください")
+	}
+	// テスター等が使うCargoも再開時の互換性確認に含めます。
 	if _, e := exec.LookPath("cargo"); e == nil {
 		programs["cargo"] = true
 	}

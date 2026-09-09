@@ -22,7 +22,8 @@ def fixture(root):
     (root / 'solver/main.cpp').write_text('''#include <cstdio>
 #include <unistd.h>
 constexpr int WIDTH = 1; // @tune 1 10
-int main(){int x; if(scanf("%d", &x)!=1)return 2; usleep(30000); printf("%d\\n", WIDTH); fprintf(stderr,"Score = %d\\n",100-(WIDTH-x)*(WIDTH-x));}
+constexpr int BONUS = 0; // @tune -2 2
+int main(){int x; if(scanf("%d", &x)!=1)return 2; usleep(30000); printf("%d\\n", WIDTH); fprintf(stderr,"Score = %d\\n",100-(WIDTH-x)*(WIDTH-x)+BONUS);}
 ''')
     (root / 'ahc-plaza.toml').write_text('''[project]
 problem="test"
@@ -97,6 +98,10 @@ def main():
         assert original == (root / 'solver/main.cpp').read_bytes()
         validation = json.loads(run('tune', 'validate', '--study', identifier, '--input-dir', 'ahc-plaza/inputs/validation', '--threads', '1').stdout)
         assert len(validation['validations']) == 1 and not validation['validations'][0]['error'], validation
+        with sqlite3.connect(root / 'ahc-plaza/ahc-plaza.db') as db:
+            metadata = db.execute('SELECT config_hash,compiler_version,pahcer_version FROM runs WHERE id=?', (result['baseline_run'],)).fetchone()
+            for run_id in [validation['validations'][0]['baseline_run'], validation['validations'][0]['candidate_run']]:
+                assert db.execute('SELECT config_hash,compiler_version,pahcer_version FROM runs WHERE id=?', (run_id,)).fetchone() == metadata
         # Source/config/input edits must not enter subsequent trials of this Study.
         (root / 'solver/main.cpp').write_text('this is deliberately not C++')
         (root / 'ahc-plaza/inputs/train/0.txt').write_text('9999')

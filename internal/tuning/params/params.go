@@ -65,7 +65,11 @@ func Parse(source []byte) (Scan, error) {
 					break
 				}
 				end += n
-				if end > 0 && s[end-1] == '\\' {
+				previous := end - 1
+				if previous >= 0 && s[previous] == '\r' {
+					previous--
+				}
+				if previous >= 0 && s[previous] == '\\' {
 					end++
 					continue
 				}
@@ -101,7 +105,27 @@ func Parse(source []byte) (Scan, error) {
 			} else {
 				end += i
 			}
+			continued := false
+			for end < len(s) {
+				previous := end - 1
+				if previous >= 0 && s[previous] == '\r' {
+					previous--
+				}
+				if previous < 0 || s[previous] != '\\' {
+					break
+				}
+				continued = true
+				next := strings.IndexByte(s[end+1:], '\n')
+				if next < 0 {
+					end = len(s)
+					break
+				}
+				end += next + 1
+			}
 			comment := s[i+2 : end]
+			if continued && strings.Contains(comment, "@tune") {
+				return out, fmt.Errorf("%d行: 行継続コメント内の注釈は未対応です", line)
+			}
 			if strings.Contains(comment, "@tune") {
 				if depth != 0 || conditional != 0 || strings.Contains(s[start:i], "\\") {
 					return out, fmt.Errorf("%d行: グローバルの条件分岐外で1行の宣言を使ってください", line)
@@ -173,6 +197,10 @@ func Parse(source []byte) (Scan, error) {
 				}
 				out.Parameters = append(out.Parameters, p)
 			}
+			line += strings.Count(s[i:end], "\n")
+			if n := strings.LastIndexByte(s[i:end], '\n'); n >= 0 {
+				start = i + n + 1
+			}
 			i = end
 			continue
 		}
@@ -212,6 +240,10 @@ func Parse(source []byte) (Scan, error) {
 				start = i + n + 1
 			}
 			i = end
+			continue
+		}
+		if c == '\'' && i > 0 && i+1 < len(s) && strings.ContainsRune("0123456789abcdefABCDEF", rune(s[i-1])) && strings.ContainsRune("0123456789abcdefABCDEF", rune(s[i+1])) {
+			i++
 			continue
 		}
 		if c == '"' || c == '\'' {
@@ -419,6 +451,17 @@ func ValidateValues(parameters []Parameter, values map[string]float64) error {
 			return fmt.Errorf("%sの候補が探索範囲外です", p.Name)
 		}
 		if p.Step != nil {
+			if p.integer() {
+				rat := func(x float64) *big.Rat {
+					r, _ := new(big.Rat).SetString(strconv.FormatFloat(x, 'g', -1, 64))
+					return r
+				}
+				q := new(big.Rat).Quo(new(big.Rat).Sub(rat(v), rat(*p.Low)), rat(*p.Step))
+				if !q.IsInt() {
+					return fmt.Errorf("%sの候補が刻みに一致しません", p.Name)
+				}
+				continue
+			}
 			q := (v - *p.Low) / *p.Step
 			if math.Abs(q-math.Round(q)) > 1e-8*math.Max(1, math.Abs(q)) {
 				return fmt.Errorf("%sの候補が刻みに一致しません", p.Name)

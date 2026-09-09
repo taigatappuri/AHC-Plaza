@@ -66,13 +66,13 @@ func (m *Manager) Export(ctx context.Context, id string, number *int) (Export, e
 		name = fmt.Sprintf("main.trial-%d", *number)
 	}
 	path := filepath.Join(exports, name+".cpp")
-	if e = atomicFile(path, source); e != nil {
-		return Export{}, e
-	}
-	// Export is identical to the compiled Run's snapshot; preserve the original build contract.
+	// 同じビルド条件で成功したRunのスナップショットと一致することを確認します。
 	selectedRun := s.BestRun
 	if number != nil {
-		ts, _ := m.Store.Trials(ctx, id, 0, 10000)
+		ts, e := m.Store.Trials(ctx, id, 0, 10000)
+		if e != nil {
+			return Export{}, e
+		}
 		for _, t := range ts {
 			if t.Number == *number {
 				selectedRun = t.RunID
@@ -85,6 +85,9 @@ func (m *Manager) Export(ctx context.Context, id string, number *int) (Export, e
 	}
 	if params.Hash(source) != run.SourceHash {
 		return Export{}, fmt.Errorf("保存した成功Runと書き出しソースが一致しません")
+	}
+	if e = atomicFile(path, source); e != nil {
+		return Export{}, e
 	}
 	b, _ := json.MarshalIndent(map[string]any{"study_id": id, "run_id": selectedRun, "parameters": values, "actual": actual, "source_hash": params.Hash(source)}, "", "  ")
 	if e = atomicFile(filepath.Join(exports, name+".json"), b); e != nil {
@@ -137,6 +140,9 @@ func (m *Manager) Validate(ctx context.Context, id string, r ValidationRequest) 
 		return result, fmt.Errorf("探索に使っていない別入力セットを選んでください")
 	}
 	prepared.Config = v.Prepared.Config
+	prepared.ConfigHash = v.Prepared.ConfigHash
+	prepared.CompilerVersion = v.Prepared.CompilerVersion
+	prepared.PahcerVersion = v.Prepared.PahcerVersion
 	prepared.ToolsDir = v.Prepared.ToolsDir
 	prepared.SettingFile = v.Prepared.SettingFile
 	v.Prepared = prepared
@@ -249,7 +255,7 @@ func (m *Manager) Usage(id string) int64 {
 	return total
 }
 
-// ToolHealth checks imports without changing user packages or downloading anything.
+// ToolHealth はユーザー環境を変更せず同梱ライブラリの起動を確認します。
 func ToolHealth(ctx context.Context, python string) error {
 	timeout, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,7 +24,13 @@ func OpenSQLite(path string) (*SQLiteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("could not create database directory: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	// 接続が張り直されても短時間の競合を待機し、書込み前のロック昇格を避けます。
+	dsn := url.URL{Scheme: "file", Path: absolute, RawQuery: "_pragma=busy_timeout%285000%29&_txlock=immediate"}
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, fmt.Errorf("could not open SQLite database: %w", err)
 	}
@@ -69,11 +76,11 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (domain.Run, error)
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, run_number, problem, objective, solver_path, input_dir, input_cases_hash,
        source_path, source_hash, config_hash, pahcer_version, compiler_version,
-       threads, timeout_ms, status, comment, created_at, started_at, finished_at
+       threads, timeout_ms, status, comment, created_at, started_at, finished_at, tuning_study
 FROM runs WHERE id = ?
 `, id)
 	var run domain.Run
-	err := scanRunColumns(row, &run)
+	err := scanRunColumns(row, &run, &run.TuningStudy)
 	return run, err
 }
 

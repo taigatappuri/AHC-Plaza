@@ -58,3 +58,15 @@ func TestRangeAndHash(t *testing.T) {
 		t.Fatal("hash accepted")
 	}
 }
+
+func TestUnrelatedDigitSeparatorsAndContinuedComments(t *testing.T) {
+	source := "long long INF=1'000'000;\nint X=1; // @tune 1 3\n"
+	scan, e := Parse([]byte(source))
+	if e != nil || len(scan.Parameters) != 1 {
+		t.Fatal(scan, e)
+	}
+	source = "// ignored \\\nint X=1; // @tune 1 3\n"
+	if _, e = Parse([]byte(source)); e == nil {
+		t.Fatal("continued comment accepted")
+	}
+}

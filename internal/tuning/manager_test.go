@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,44 @@ import (
 	bundled "github.com/taigatappuri/AHC-Plaza/internal/tuning/runtime"
 	"github.com/taigatappuri/AHC-Plaza/internal/usecase"
 )
+
+func TestInspectToolsValidatesCandidateBuild(t *testing.T) {
+	bin := t.TempDir()
+	for _, program := range []string{"g++", "pahcer", "cargo"} {
+		if err := os.WriteFile(filepath.Join(bin, program), []byte("#!/bin/sh\necho test-version\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	for _, tc := range []struct {
+		name, compile, evaluation, wantError string
+	}{
+		{"direct", `args=["main.cpp", "-o", "main.exe"]`, `program="./main.exe"`, ""},
+		{"tester", `args=["main.cpp", "-o", "main.exe"]`, "program=\"./tools/target/release/tester\"\nargs=[\"./main.exe\"]", ""},
+		{"cargo tester", "args=[\"main.cpp\", \"-o\", \"main.exe\"]\n[[test.compile_steps]]\nprogram=\"cargo\"\nargs=[\"build\", \"--release\"]\ncurrent_dir=\"tools\"", `program="./main.exe"`, ""},
+		{"different binary", `args=["main.cpp", "-o", "main.exe"]`, `program="./old.exe"`, "test_steps"},
+		{"other source", `args=["main.cpp", "helper.cpp"]`, `program="./a.out"`, "別ソース"},
+		{"external include", `args=["main.cpp", "-I../include"]`, `program="./a.out"`, "外部ソース"},
+		{"overwrites source", `args=["main.cpp", "-o", "main.cpp"]`, `program="./main.cpp"`, "出力先"},
+		{"external workspace", `args=["main.cpp"]`, "program=\"./a.out\"\ncurrent_dir=\"../old\"", "作業場所"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setting := filepath.Join(t.TempDir(), "pahcer.toml")
+			content := "[[test.compile_steps]]\nprogram=\"g++\"\n" + tc.compile + "\n[[test.test_steps]]\n" + tc.evaluation + "\n"
+			if err := os.WriteFile(setting, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			versions, err := inspectTools(context.Background(), setting)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("want %q, got %v", tc.wantError, err)
+				}
+			} else if err != nil || len(versions) != 3 {
+				t.Fatalf("versions=%v error=%v", versions, err)
+			}
+		})
+	}
+}
 
 func TestRecoverRunAndOutboxAfterInterruption(t *testing.T) {
 	ctx := context.Background()

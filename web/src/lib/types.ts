@@ -1,4 +1,4 @@
-export type Tab = 'overview' | 'input' | 'detail' | 'compare' | 'settings'
+export type Tab = 'overview' | 'tuning' | 'input' | 'detail' | 'compare' | 'settings'
 
 export type InputGenerator = {
   name: string

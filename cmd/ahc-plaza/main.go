@@ -18,6 +18,8 @@ import (
 	"github.com/taigatappuri/AHC-Plaza/internal/config"
 	"github.com/taigatappuri/AHC-Plaza/internal/project"
 	"github.com/taigatappuri/AHC-Plaza/internal/server"
+	"github.com/taigatappuri/AHC-Plaza/internal/tuning"
+	bundled "github.com/taigatappuri/AHC-Plaza/internal/tuning/runtime"
 	"github.com/taigatappuri/AHC-Plaza/internal/usecase"
 )
 
@@ -54,6 +56,8 @@ func execute(args []string) error {
 	}
 
 	switch args[0] {
+	case "tune":
+		return executeTune(args[1:])
 	case "case-exec":
 		return executeCase(args[1:])
 	case "init":
@@ -128,7 +132,7 @@ func executeGUIContext(ctx context.Context, args []string) (resultErr error) {
 	if err != nil {
 		return fmt.Errorf("could not start the GUI server: %w", err)
 	}
-	webServer, err := server.New(root, *configPath)
+	webServer, err := server.NewWithVersion(root, *configPath, version)
 	if err != nil {
 		_ = listener.Close()
 		return err
@@ -196,6 +200,7 @@ func executeInit(args []string) error {
 func executeDoctor(args []string) error {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	configPath := flags.String("config", "ahc-plaza.toml", "configuration file")
+	checkTuning := flags.Bool("tuning", false, "check bundled tuning runtime")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -209,6 +214,14 @@ func executeDoctor(args []string) error {
 	fmt.Printf("OK: configuration %s\n", filepath.Base(cfg.FilePath))
 	for _, result := range project.Check(cfg) {
 		fmt.Println(result)
+	}
+	info := bundled.Status(cfg.ProjectRoot)
+	fmt.Printf("Tuning: bundled=%t ready=%t Python=%s Optuna=%s\n", info.Available, info.Ready, info.Python, info.Optuna)
+	if *checkTuning {
+		if !info.Ready {
+			return fmt.Errorf("チューニング環境が未展開です。tune setupまたはGUIから準備してください")
+		}
+		return tuning.ToolHealth(context.Background(), filepath.Join(info.Path, "bin", "python3.12"))
 	}
 	return nil
 }
@@ -262,6 +275,7 @@ func executeRun(args []string) error {
 func printUsage() {
 	fmt.Println(`Usage:
   ahc-plaza init --problem <PROBLEM_NAME> --objective <max|min>
+  ahc-plaza tune [setup|resume|export|validate|clean-runtime] [OPTIONS]
   ahc-plaza doctor
   ahc-plaza run [OPTIONS]
   ahc-plaza gui [OPTIONS]
