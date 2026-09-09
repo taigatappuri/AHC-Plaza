@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/taigatappuri/AHC-Plaza/internal/inputfeature"
+	"github.com/taigatappuri/AHC-Plaza/internal/process"
 	"github.com/taigatappuri/AHC-Plaza/internal/store"
 )
 
@@ -24,14 +25,15 @@ type Server struct {
 	Store         *store.SQLiteStore
 	featureRunner *inputfeature.Runner
 
-	mu           sync.Mutex
-	visualizerMu sync.Mutex
-	runWG        sync.WaitGroup
-	closeOnce    sync.Once
-	closeErr     error
-	closing      bool
-	cancels      map[string]context.CancelFunc
-	failures     map[string]string
+	mu            sync.Mutex
+	visualizerMu  sync.Mutex
+	runWG         sync.WaitGroup
+	closeOnce     sync.Once
+	closeErr      error
+	unlockProject func()
+	closing       bool
+	cancels       map[string]context.CancelFunc
+	failures      map[string]string
 }
 
 func New(root, configPath string) (*Server, error) {
@@ -45,6 +47,16 @@ func New(root, configPath string) (*Server, error) {
 	} else if !filepath.IsAbs(configPath) {
 		configPath = filepath.Join(root, configPath)
 	}
+	unlock, err := process.LockProject(root)
+	if err != nil {
+		return nil, err
+	}
+	success := false
+	defer func() {
+		if !success {
+			unlock()
+		}
+	}()
 	database, err := store.OpenSQLite(filepath.Join(root, "ahc-plaza", "ahc-plaza.db"))
 	if err != nil {
 		return nil, err
@@ -58,7 +70,8 @@ func New(root, configPath string) (*Server, error) {
 		database.Close()
 		return nil, err
 	}
-	return &Server{Root: root, ConfigPath: configPath, Store: database, featureRunner: featureRunner, cancels: make(map[string]context.CancelFunc), failures: make(map[string]string)}, nil
+	success = true
+	return &Server{unlockProject: unlock, Root: root, ConfigPath: configPath, Store: database, featureRunner: featureRunner, cancels: make(map[string]context.CancelFunc), failures: make(map[string]string)}, nil
 }
 
 func (s *Server) Close() error {
@@ -70,6 +83,9 @@ func (s *Server) Close() error {
 		s.failures = make(map[string]string)
 		s.mu.Unlock()
 		s.closeErr = s.Store.Close()
+		if s.unlockProject != nil {
+			s.unlockProject()
+		}
 	})
 	return s.closeErr
 }

@@ -63,6 +63,9 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 			return fmt.Errorf("could not create the SQLite schema: %w", err)
 		}
 	}
+	if err := s.ensureColumn(ctx, "runs", "tuning_study", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn(ctx, "runs", "run_number", "INTEGER"); err != nil {
 		return err
 	}
@@ -105,7 +108,7 @@ UPDATE cases SET status = 'tle'
 WHERE status = 'wa' AND instr(error_message, '(exit status: 124)') > 0`); err != nil {
 		return fmt.Errorf("could not migrate timed-out case statuses: %w", err)
 	}
-	return nil
+	return s.migrateTuning(ctx)
 }
 
 func (s *SQLiteStore) ensureColumn(ctx context.Context, table, column, definition string) error {

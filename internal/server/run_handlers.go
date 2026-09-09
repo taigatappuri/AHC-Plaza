@@ -142,7 +142,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		limit := 100
-		runs, err := s.Store.ListRunSummaries(r.Context(), limit)
+		runs, err := s.Store.ListRunSummariesWithTuning(r.Context(), limit, r.URL.Query().Get("include_tuning") == "true")
 		if writeErrorIf(w, http.StatusInternalServerError, err) {
 			return
 		}
@@ -182,8 +182,7 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		_, runErr := usecase.ExecuteRunWithStore(ctx, input, s.Store)
 		if runErr != nil {
 			s.recordRunFailure(runID, runErr)
-			finishedAt := time.Now().UTC()
-			_ = s.Store.UpdateRunStatus(context.Background(), runID, domain.RunFailed, &finishedAt)
+			_ = s.Store.FailActiveRun(context.Background(), runID)
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"run_id": runID, "status": string(domain.RunQueued)})

@@ -14,6 +14,7 @@ const (
 )
 
 type Run struct {
+	TuningStudy         string     `json:"tuning_study,omitempty"`
 	ID                  string     `json:"id"`
 	RunNumber           int        `json:"run_number"`
 	Problem             string     `json:"problem"`

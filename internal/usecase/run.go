@@ -34,7 +34,13 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 	if request.ConfigPath == "" {
 		request.ConfigPath = "ahc-plaza.toml"
 	}
-	cfg, err := config.Load(request.ConfigPath)
+	var cfg config.Config
+	var err error
+	if request.Prepared != nil {
+		cfg = request.Prepared.Config
+	} else {
+		cfg, err = config.Load(request.ConfigPath)
+	}
 	if err != nil {
 		return RunSummary{}, err
 	}
@@ -54,30 +60,53 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 		request.SettingFile = cfg.File.Pahcer.SettingFile
 	}
 
-	inputDir, err := cfg.InputSetDir(request.InputDir)
-	if err != nil {
-		return RunSummary{}, err
-	}
-	inputCases, err := cases.Discover(inputDir)
-	if err != nil {
-		return RunSummary{}, err
+	var inputDir, toolsDir, settingFile string
+	var inputCases []domain.InputCase
+	if request.Prepared != nil {
+		inputDir, toolsDir, settingFile = request.Prepared.InputDir, request.Prepared.ToolsDir, request.Prepared.SettingFile
+		inputCases = request.Prepared.Inputs
+	} else {
+		inputDir, err = cfg.InputSetDir(request.InputDir)
+		if err != nil {
+			return RunSummary{}, err
+		}
+		inputCases, err = cases.Discover(inputDir)
+		if err != nil {
+			return RunSummary{}, err
+		}
+		toolsDir, err = cfg.ResolveProjectPath("paths.tools_dir", cfg.File.Paths.ToolsDir)
+		if err != nil {
+			return RunSummary{}, err
+		}
+		settingFile, err = cfg.ResolveProjectPath("setting_file", request.SettingFile)
+		if err != nil {
+			return RunSummary{}, err
+		}
 	}
 	if len(inputCases) == 0 {
 		return RunSummary{}, errors.New("no input cases found")
 	}
-
 	solverPath, err := cfg.ResolveProjectPath("solver", request.Solver)
 	if err != nil {
 		return RunSummary{}, err
 	}
-	toolsDir, err := cfg.ResolveProjectPath("paths.tools_dir", cfg.File.Paths.ToolsDir)
+	if database == nil {
+		unlock, err := process.LockProject(cfg.ProjectRoot)
+		if err != nil {
+			return RunSummary{}, err
+		}
+		defer unlock()
+		database, err = store.OpenSQLite(filepath.Join(cfg.PathRoot, "ahc-plaza.db"))
+		if err != nil {
+			return RunSummary{}, err
+		}
+		defer database.Close()
+	}
+	release, err := database.AcquireExecution(ctx)
 	if err != nil {
 		return RunSummary{}, err
 	}
-	settingFile, err := cfg.ResolveProjectPath("setting_file", request.SettingFile)
-	if err != nil {
-		return RunSummary{}, err
-	}
+	defer release()
 	caseRunner, err := os.Executable()
 	if err != nil {
 		return RunSummary{}, fmt.Errorf("could not locate the case runner: %w", err)
@@ -108,6 +137,7 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 	createdAt := time.Now().UTC()
 	run := domain.Run{
 		ID:                  runID,
+		TuningStudy:         request.TuningStudy,
 		Problem:             cfg.File.Project.Problem,
 		Objective:           cfg.File.Project.Objective,
 		SolverPath:          relativePath(cfg.ProjectRoot, solverPath),
@@ -126,13 +156,6 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 		StartedAt:           createdAt,
 	}
 
-	if database == nil {
-		database, err = store.OpenSQLite(filepath.Join(cfg.PathRoot, "ahc-plaza.db"))
-		if err != nil {
-			return RunSummary{}, err
-		}
-		defer database.Close()
-	}
 	if err := database.SaveRun(ctx, run); err != nil {
 		return RunSummary{}, err
 	}
@@ -169,13 +192,13 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 	if parseErr != nil && processResult.Status == process.StatusSucceeded {
 		status = domain.RunFailed
 	}
-	if err := database.UpdateRunStatus(ctx, runID, status, &finishedAt); err != nil {
-		return RunSummary{}, err
+	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer persistCancel()
+	if parseErr != nil {
+		caseResults = nil
 	}
-	if parseErr == nil && len(caseResults) > 0 {
-		if err := database.SaveCaseResults(ctx, caseResults); err != nil {
-			return RunSummary{}, err
-		}
+	if err := database.FinalizeRun(persistCtx, runID, status, finishedAt, caseResults); err != nil {
+		return RunSummary{}, err
 	}
 
 	summary := RunSummary{
