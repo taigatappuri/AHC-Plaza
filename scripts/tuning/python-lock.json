@@ -1,0 +1,24 @@
+{
+  "version": "3.12.14",
+  "release": "20260901",
+  "assets": {
+    "amd64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "72748da13197c1fb161e3afeef20a6a385ff24f2165e6e2758e47008e7faba4c",
+      "size": 34143368,
+      "full": {
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst",
+        "sha256": "f2e7bf187eaa66f88432b13cc560528c328b51d452de2fd0875561c82f7168e7"
+      }
+    },
+    "arm64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "sha256": "577b4bec0793ad1ff0cbff9adbd0df078eddde38a4c41bf5d83ad381a85ee39d",
+      "size": 29199399,
+      "full": {
+        "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-aarch64-unknown-linux-gnu-pgo%2Blto-full.tar.zst",
+        "sha256": "c9f8e00d186145e31ff8f3edd9bb34ced2e44d6ff9b6c007a1bc079761255fb3"
+      }
+    }
+  }
+}

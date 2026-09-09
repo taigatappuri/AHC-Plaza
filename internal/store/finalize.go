@@ -17,6 +17,13 @@ func (s *SQLiteStore) AcquireExecution(ctx context.Context) (func(), error) {
 }
 func (s *SQLiteStore) FinalizeRun(ctx context.Context, id string, status domain.RunStatus, finished time.Time, results []domain.CaseResult) error {
 	return s.transaction(ctx, func(tx *sql.Tx) error {
+		var previous string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE id=?`, id).Scan(&previous); err != nil {
+			return err
+		}
+		if previous != "running" && previous != "queued" {
+			return nil
+		}
 		for _, r := range results {
 			if _, e := tx.ExecContext(ctx, `INSERT OR REPLACE INTO cases (run_id,input_case_id,seed,input_path,score,execution_time_ns,status,stdout_path,stderr_path,output_path,error_message) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, r.RunID, r.InputCaseID, r.Seed, r.InputPath, r.Score, r.ExecutionTime.Nanoseconds(), r.Status, r.StdoutPath, r.StderrPath, r.OutputPath, r.ErrorMessage); e != nil {
 				return e

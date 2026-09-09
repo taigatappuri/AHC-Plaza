@@ -156,6 +156,11 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 		StartedAt:           createdAt,
 	}
 
+	if request.Prepared != nil {
+		run.ConfigHash = request.Prepared.ConfigHash
+		run.CompilerVersion = request.Prepared.CompilerVersion
+		run.PahcerVersion = request.Prepared.PahcerVersion
+	}
 	if err := database.SaveRun(ctx, run); err != nil {
 		return RunSummary{}, err
 	}

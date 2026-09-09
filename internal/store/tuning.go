@@ -15,6 +15,7 @@ func (s *SQLiteStore) migrateTuning(ctx context.Context) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS tuning_run_unique ON tuning_trials(run_id) WHERE run_id != ''`,
 		`CREATE TABLE IF NOT EXISTS tuning_outbox(study_id TEXT NOT NULL,number INTEGER NOT NULL,data TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(study_id,number))`,
 		`CREATE TABLE IF NOT EXISTS tuning_profiles(source_hash TEXT PRIMARY KEY,data TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS tuning_profile_sources(solver TEXT PRIMARY KEY,source_hash TEXT NOT NULL,data TEXT NOT NULL)`,
 	} {
 		if _, e := s.db.ExecContext(ctx, q); e != nil {
 			return e
@@ -65,6 +66,27 @@ func (s *SQLiteStore) SaveTrial(ctx context.Context, v domain.TuningTrial) error
 		return e
 	}
 	return s.transaction(ctx, func(tx *sql.Tx) error {
+		var previous []byte
+		err := tx.QueryRowContext(ctx, `SELECT data FROM tuning_trials WHERE study_id=? AND number=?`, v.StudyID, v.Number).Scan(&previous)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			var saved domain.TuningTrial
+			if err := json.Unmarshal(previous, &saved); err != nil {
+				return err
+			}
+			if saved.Status != "RUNNING" {
+				saved.Delivered = v.Delivered
+				canonical, err := json.Marshal(saved)
+				if err != nil {
+					return err
+				}
+				if string(canonical) != string(b) {
+					return fmt.Errorf("確定済みTrialの結果は変更できません")
+				}
+			}
+		}
 		if _, e := tx.ExecContext(ctx, `INSERT INTO tuning_trials VALUES(?,?,?,?) ON CONFLICT(study_id,number) DO UPDATE SET run_id=excluded.run_id,data=excluded.data`, v.StudyID, v.Number, v.RunID, b); e != nil {
 			return e
 		}
@@ -109,4 +131,27 @@ func (s *SQLiteStore) Profile(ctx context.Context, hash string) (json.RawMessage
 		return nil, nil
 	}
 	return b, e
+}
+
+type SourceProfile struct {
+	Hash       string          `json:"hash"`
+	Parameters json.RawMessage `json:"parameters"`
+}
+
+func (s *SQLiteStore) SaveSourceProfile(ctx context.Context, solver, hash string, data []byte) error {
+	return s.transaction(ctx, func(tx *sql.Tx) error {
+		if _, e := tx.ExecContext(ctx, `INSERT INTO tuning_profiles VALUES(?,?) ON CONFLICT(source_hash) DO UPDATE SET data=excluded.data`, hash, data); e != nil {
+			return e
+		}
+		_, e := tx.ExecContext(ctx, `INSERT INTO tuning_profile_sources VALUES(?,?,?) ON CONFLICT(solver) DO UPDATE SET source_hash=excluded.source_hash,data=excluded.data`, solver, hash, data)
+		return e
+	})
+}
+func (s *SQLiteStore) PreviousProfile(ctx context.Context, solver, hash string) (*SourceProfile, error) {
+	var p SourceProfile
+	e := s.db.QueryRowContext(ctx, `SELECT source_hash,data FROM tuning_profile_sources WHERE solver=? AND source_hash!=?`, solver, hash).Scan(&p.Hash, &p.Parameters)
+	if e == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &p, e
 }

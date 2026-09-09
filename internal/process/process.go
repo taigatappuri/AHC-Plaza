@@ -76,7 +76,7 @@ func Run(ctx context.Context, request Request) (Result, error) {
 	command.Env = append(os.Environ(), request.Env...)
 	command.Stdout = stdout
 	command.Stderr = stderr
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 	command.Cancel = func() error {
 		killProcessGroup(command.Process)
 		return nil

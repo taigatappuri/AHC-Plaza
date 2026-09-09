@@ -1,0 +1,277 @@
+package tuning
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
+
+	"github.com/taigatappuri/AHC-Plaza/internal/domain"
+	"github.com/taigatappuri/AHC-Plaza/internal/tuning/params"
+	"github.com/taigatappuri/AHC-Plaza/internal/usecase"
+)
+
+type Export struct {
+	Path       string             `json:"path"`
+	Source     string             `json:"source"`
+	Parameters map[string]float64 `json:"parameters"`
+}
+
+func (m *Manager) candidate(ctx context.Context, s domain.TuningStudy, number *int) (map[string]float64, error) {
+	if number == nil {
+		if s.BestValue == nil {
+			return nil, fmt.Errorf("成功した評価がありません")
+		}
+		return s.BestParams, nil
+	}
+	trials, e := m.Store.Trials(ctx, s.ID, 0, 10000)
+	if e != nil {
+		return nil, e
+	}
+	for _, t := range trials {
+		if t.Number == *number && t.Status == "COMPLETE" {
+			return t.Params, nil
+		}
+	}
+	return nil, fmt.Errorf("成功したTrialを指定してください")
+}
+func (m *Manager) Export(ctx context.Context, id string, number *int) (Export, error) {
+	s, v, e := m.Load(ctx, id)
+	if e != nil {
+		return Export{}, e
+	}
+	values, e := m.candidate(ctx, s, number)
+	if e != nil {
+		return Export{}, e
+	}
+	dir, _ := m.dir(id)
+	original, e := os.ReadFile(filepath.Join(dir, "fixed", "original.cpp"))
+	if e != nil {
+		return Export{}, e
+	}
+	source, actual, e := params.Generate(original, v.SourceHash, v.Parameters, values)
+	if e != nil {
+		return Export{}, e
+	}
+	exports := filepath.Join(dir, "exports")
+	if e = os.MkdirAll(exports, 0700); e != nil {
+		return Export{}, e
+	}
+	name := "main.best"
+	if number != nil {
+		name = fmt.Sprintf("main.trial-%d", *number)
+	}
+	path := filepath.Join(exports, name+".cpp")
+	if e = atomicFile(path, source); e != nil {
+		return Export{}, e
+	}
+	// Export is identical to the compiled Run's snapshot; preserve the original build contract.
+	selectedRun := s.BestRun
+	if number != nil {
+		ts, _ := m.Store.Trials(ctx, id, 0, 10000)
+		for _, t := range ts {
+			if t.Number == *number {
+				selectedRun = t.RunID
+			}
+		}
+	}
+	run, e := m.Store.GetRun(ctx, selectedRun)
+	if e != nil {
+		return Export{}, e
+	}
+	if params.Hash(source) != run.SourceHash {
+		return Export{}, fmt.Errorf("保存した成功Runと書き出しソースが一致しません")
+	}
+	b, _ := json.MarshalIndent(map[string]any{"study_id": id, "run_id": selectedRun, "parameters": values, "actual": actual, "source_hash": params.Hash(source)}, "", "  ")
+	if e = atomicFile(filepath.Join(exports, name+".json"), b); e != nil {
+		return Export{}, e
+	}
+	rel, _ := filepath.Rel(m.Root, path)
+	return Export{Path: rel, Source: string(source), Parameters: values}, nil
+}
+
+type ValidationRequest struct {
+	InputDir string `json:"input_dir"`
+	Number   *int   `json:"number"`
+	Threads  int    `json:"threads"`
+}
+
+func (m *Manager) Validate(ctx context.Context, id string, r ValidationRequest) (domain.TuningValidation, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	result := domain.TuningValidation{InputDir: r.InputDir}
+	s, v, e := m.Load(ctx, id)
+	if e != nil {
+		return result, e
+	}
+	if m.Busy() {
+		return result, fmt.Errorf("実行中のStudyを停止してから検証してください")
+	}
+	if e = m.verify(ctx, s, v); e != nil {
+		return result, e
+	}
+	values, e := m.candidate(ctx, s, r.Number)
+	if e != nil {
+		return result, e
+	}
+	if r.Threads < 0 || r.Threads > 256 {
+		return result, fmt.Errorf("並列数が不正です")
+	}
+	if r.Threads == 0 {
+		r.Threads = v.Request.Threads
+	}
+	validationID, e := usecase.NewRunID()
+	if e != nil {
+		return result, e
+	}
+	dir, _ := m.dir(id)
+	prepared, e := usecase.PrepareRunInputs(ctx, usecase.RunRequest{ConfigPath: m.ConfigPath, InputDir: r.InputDir}, filepath.Join(dir, "validations", validationID))
+	if e != nil {
+		return result, e
+	}
+	if sameInputs(prepared, v.Prepared) {
+		return result, fmt.Errorf("探索に使っていない別入力セットを選んでください")
+	}
+	prepared.Config = v.Prepared.Config
+	prepared.ToolsDir = v.Prepared.ToolsDir
+	prepared.SettingFile = v.Prepared.SettingFile
+	v.Prepared = prepared
+	v.Request.Threads = r.Threads
+	result.BaselineRun, e = usecase.NewRunID()
+	if e != nil {
+		return result, e
+	}
+	result.CandidateRun, e = usecase.NewRunID()
+	if e != nil {
+		return result, e
+	}
+	executionCtx, cancel := context.WithCancel(context.Background())
+	a := &activity{cancel: cancel, done: make(chan struct{})}
+	m.mu.Lock()
+	if m.closed || len(m.active) > 0 {
+		m.mu.Unlock()
+		cancel()
+		return result, fmt.Errorf("別の評価が実行中です")
+	}
+	m.active[id] = a
+	m.wg.Add(1)
+	m.mu.Unlock()
+	go func() {
+		defer m.wg.Done()
+		defer cancel()
+		defer func() { m.mu.Lock(); delete(m.active, id); m.mu.Unlock(); close(a.done) }()
+		validation := result
+		if _, e := m.evaluate(executionCtx, s, v, result.BaselineRun, nil); e != nil {
+			validation.Error = e.Error()
+		} else if _, e = m.evaluate(executionCtx, s, v, result.CandidateRun, values); e != nil {
+			validation.Error = e.Error()
+		}
+		s.Validations = append(s.Validations, validation)
+		if e = m.save(&s); e != nil {
+			fmt.Fprintln(os.Stderr, e)
+		}
+	}()
+	return result, nil
+}
+func sameInputs(a, b usecase.PreparedRun) bool {
+	hashes := map[string]bool{}
+	for _, x := range b.Inputs {
+		hashes[x.SHA256] = true
+	}
+	for _, x := range a.Inputs {
+		if hashes[x.SHA256] {
+			return true
+		}
+	}
+	return false
+}
+
+type usageSample struct {
+	at    time.Time
+	bytes int64
+}
+
+func (m *Manager) Usage(id string) int64 {
+	m.mu.Lock()
+	sample, ok := m.usageCache[id]
+	m.mu.Unlock()
+	if ok && time.Since(sample.at) < 30*time.Second {
+		return sample.bytes
+	}
+	dir, e := m.dir(id)
+	if e != nil {
+		return 0
+	}
+	var total int64
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, e error) error {
+		if e == nil && !d.IsDir() {
+			if info, e := d.Info(); e == nil {
+				total += info.Size()
+			}
+		}
+		return nil
+	})
+	ts, _ := m.Store.Trials(context.Background(), id, 0, 10000)
+	s, e := m.Store.GetStudy(context.Background(), id)
+	if e != nil {
+		return total
+	}
+	ids := []string{s.BaselineRun}
+	for _, t := range ts {
+		ids = append(ids, t.RunID)
+	}
+	for _, v := range s.Validations {
+		ids = append(ids, v.BaselineRun, v.CandidateRun)
+	}
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		_ = filepath.WalkDir(filepath.Join(m.Root, "ahc-plaza", "runs", id), func(path string, d fs.DirEntry, e error) error {
+			if e == nil && !d.IsDir() {
+				if info, e := d.Info(); e == nil {
+					total += info.Size()
+				}
+			}
+			return nil
+		})
+	}
+	m.mu.Lock()
+	if m.usageCache == nil {
+		m.usageCache = map[string]usageSample{}
+	}
+	m.usageCache[id] = usageSample{time.Now(), total}
+	m.mu.Unlock()
+	return total
+}
+
+// ToolHealth checks imports without changing user packages or downloading anything.
+func ToolHealth(ctx context.Context, python string) error {
+	timeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	b, e := exec.CommandContext(timeout, python, "-I", "-B", "-c", "import optuna, numpy, sqlalchemy; print(optuna.__version__)").CombinedOutput()
+	if e != nil {
+		return fmt.Errorf("同梱環境を実行できません: %v: %s", e, b)
+	}
+	return nil
+}
+
+func (m *Manager) LiveStudy(s domain.TuningStudy) (domain.TuningStudy, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a := m.active[s.ID]
+	if a == nil {
+		return s, false
+	}
+	if !a.started.IsZero() {
+		s.Elapsed = a.priorElapsed + time.Since(a.started).Seconds()
+	}
+	if a.pause.Load() {
+		s.Status = "stopping"
+	}
+	return s, true
+}

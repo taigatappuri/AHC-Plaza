@@ -26,6 +26,9 @@ func buildCaseResults(root, runID string, workspace pahcer.Workspace, inputCases
 	}
 	waSeeds := make(map[uint64]bool, len(resultFile.WrongAnswerSeeds))
 	for _, seed := range resultFile.WrongAnswerSeeds {
+		if seed >= uint64(len(inputCases)) {
+			return nil, fmt.Errorf("wrong-answer seed is out of range: %d", seed)
+		}
 		waSeeds[seed] = true
 	}
 	results := make([]domain.CaseResult, 0, len(resultFile.Cases))
@@ -41,6 +44,9 @@ func buildCaseResults(root, runID string, workspace pahcer.Workspace, inputCases
 		inputCase := inputCases[item.Seed]
 		caseNumber := fmt.Sprintf("%04d", item.Seed)
 		errorMessage := item.ErrorMessage
+		if item.MissingScore {
+			errorMessage = "score is missing from the case result"
+		}
 		status := "succeeded"
 		if item.TimedOut() {
 			status = "tle"

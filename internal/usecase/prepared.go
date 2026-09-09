@@ -13,11 +13,14 @@ import (
 
 // PreparedRun はStudy開始時のコピーだけを参照します。
 type PreparedRun struct {
-	Config      config.Config      `json:"config"`
-	Inputs      []domain.InputCase `json:"inputs"`
-	InputDir    string             `json:"input_dir"`
-	ToolsDir    string             `json:"tools_dir"`
-	SettingFile string             `json:"setting_file"`
+	CompilerVersion string             `json:"compiler_version"`
+	PahcerVersion   string             `json:"pahcer_version"`
+	ConfigHash      string             `json:"config_hash"`
+	Config          config.Config      `json:"config"`
+	Inputs          []domain.InputCase `json:"inputs"`
+	InputDir        string             `json:"input_dir"`
+	ToolsDir        string             `json:"tools_dir"`
+	SettingFile     string             `json:"setting_file"`
 }
 
 func PrepareRunInputs(ctx context.Context, request RunRequest, destination string) (PreparedRun, error) {
@@ -25,7 +28,7 @@ func PrepareRunInputs(ctx context.Context, request RunRequest, destination strin
 	if e != nil {
 		return PreparedRun{}, e
 	}
-	p := PreparedRun{Config: cfg}
+	p := PreparedRun{Config: cfg, ConfigHash: fileHash(cfg.FilePath)}
 	dir, e := cfg.InputSetDir(request.InputDir)
 	if e != nil {
 		return p, e

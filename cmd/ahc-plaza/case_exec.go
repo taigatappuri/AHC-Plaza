@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/taigatappuri/AHC-Plaza/internal/process"
 	"io"
 	"os"
 	"os/exec"
@@ -28,6 +29,22 @@ func executeCase(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	parent := os.Getppid()
+	go func() {
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if os.Getppid() != parent {
+					stop()
+					return
+				}
+			}
+		}
+	}()
 	return runCaseCommand(ctx, command, time.Duration(*timeoutMilliseconds)*time.Millisecond, os.Stdin, os.Stdout, os.Stderr)
 }
 
@@ -49,9 +66,7 @@ func runCaseCommand(ctx context.Context, arguments []string, timeout time.Durati
 		if command.Process == nil {
 			return nil
 		}
-		if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil {
-			_ = command.Process.Kill()
-		}
+		process.KillTree(command.Process.Pid)
 		return nil
 	}
 	err := command.Run()

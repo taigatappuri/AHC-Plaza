@@ -126,6 +126,13 @@ func Parse(source []byte) (Scan, error) {
 					return out, err
 				}
 				p.Current = value
+				unsigned := strings.TrimLeft(raw, "+-")
+				if p.integer() && len(unsigned) > 1 && unsigned[0] == '0' {
+					return out, fmt.Errorf("%d行: 先頭に0のある整数は未対応です", line)
+				}
+				if p.Type == "float" {
+					p.Current = float64(float32(value))
+				}
 				if err := p.checkValue(value); err != nil {
 					return out, fmt.Errorf("%d行: %w", line, err)
 				}
@@ -391,4 +398,35 @@ func Generate(source []byte, hash string, parameters []Parameter, values map[str
 		return nil, nil, fmt.Errorf("不明なパラメータです")
 	}
 	return out, actual, nil
+}
+
+// ValidateValues はworkerから返った候補が固定探索空間内か確認します。
+func ValidateValues(parameters []Parameter, values map[string]float64) error {
+	expected := 0
+	for _, p := range parameters {
+		if !p.Enabled {
+			continue
+		}
+		expected++
+		v, ok := values[p.Name]
+		if !ok {
+			return fmt.Errorf("候補の%sがありません", p.Name)
+		}
+		if e := p.checkValue(v); e != nil {
+			return e
+		}
+		if p.Low == nil || p.High == nil || v < *p.Low || v > *p.High {
+			return fmt.Errorf("%sの候補が探索範囲外です", p.Name)
+		}
+		if p.Step != nil {
+			q := (v - *p.Low) / *p.Step
+			if math.Abs(q-math.Round(q)) > 1e-8*math.Max(1, math.Abs(q)) {
+				return fmt.Errorf("%sの候補が刻みに一致しません", p.Name)
+			}
+		}
+	}
+	if len(values) != expected {
+		return fmt.Errorf("候補のパラメータ数が一致しません")
+	}
+	return nil
 }
