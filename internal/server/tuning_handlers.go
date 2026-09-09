@@ -47,11 +47,16 @@ func (s *Server) handleTuning(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if path == "input-directories" && r.Method == "GET" {
+		s.listInputDirectories(w, r, config.TuningInputRoot)
+		return
+	}
 	if path == "input-count" && r.Method == "GET" {
 		cfg, e := config.Load(s.ConfigPath)
 		if writeErrorIf(w, 400, e) {
 			return
 		}
+		cfg.File.Execution.DefaultInputDir = config.TuningInputRoot
 		dir, e := cfg.InputSetDir(r.URL.Query().Get("input_dir"))
 		if writeErrorIf(w, 400, e) {
 			return

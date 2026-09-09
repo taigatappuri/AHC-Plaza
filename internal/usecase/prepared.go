@@ -23,11 +23,12 @@ type PreparedRun struct {
 	SettingFile     string             `json:"setting_file"`
 }
 
-func PrepareRunInputs(ctx context.Context, request RunRequest, destination string) (PreparedRun, error) {
+func PrepareTuningInputs(ctx context.Context, request RunRequest, destination string) (PreparedRun, error) {
 	cfg, e := config.Load(request.ConfigPath)
 	if e != nil {
 		return PreparedRun{}, e
 	}
+	cfg.File.Execution.DefaultInputDir = config.TuningInputRoot
 	p := PreparedRun{Config: cfg, ConfigHash: fileHash(cfg.FilePath)}
 	dir, e := cfg.InputSetDir(request.InputDir)
 	if e != nil {

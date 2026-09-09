@@ -174,7 +174,7 @@ func (m *Manager) Start(ctx context.Context, r StartRequest) (domain.TuningStudy
 			os.RemoveAll(dir)
 		}
 	}()
-	p, e := usecase.PrepareRunInputs(ctx, usecase.RunRequest{ConfigPath: m.ConfigPath, InputDir: r.InputDir}, filepath.Join(dir, "fixed"))
+	p, e := usecase.PrepareTuningInputs(ctx, usecase.RunRequest{ConfigPath: m.ConfigPath, InputDir: r.InputDir}, filepath.Join(dir, "fixed"))
 	if e != nil {
 		return s, e
 	}

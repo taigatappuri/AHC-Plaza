@@ -3,7 +3,7 @@
   import { errorMessage, requestJSON } from '../lib/api'
   import type { TuneParameter, TuneScan, TuneStudy, TuneTrial, TuneEnvironment, TuneDetail } from '../lib/tuning'
   export let solvers: string[] = []
-  export let inputDirectories: string[] = []
+  let inputDirectories: string[] = [], inputsLoading = false
   export let objective = 'max'
   export let onOpenRun: (id: string) => void = () => {}
   export let onCompare: (a: string, b: string) => void = () => {}
@@ -40,6 +40,16 @@
   }
   async function post<T>(path: string, body: unknown = {}): Promise<T> { return requestJSON<T>(`/api/tuning/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) }
   async function action(fn: () => Promise<void>) { if (busy) return; busy = true; message = ''; try { await fn() } catch (e) { message = errorMessage(e) } finally { busy = false } }
+  async function loadInputDirectories() {
+    inputsLoading = true
+    try {
+      const response = await requestJSON<{ input_directories: string[] }>('/api/tuning/input-directories')
+      inputDirectories = response.input_directories
+      countInput = ''
+      if (!inputDirectories.includes(inputDir)) inputDir = inputDirectories[0] ?? ''
+      if (!inputDirectories.includes(validationInput)) validationInput = ''
+    } finally { inputsLoading = false }
+  }
   async function loadStudies() { studies = await requestJSON<TuneStudy[]>('/api/tuning/studies') }
   async function detect() { await action(async () => { const response = await post<{ scan: TuneScan; profile: TuneParameter[] | null; previous_profile: { parameters: TuneParameter[] } | null }>('scan', { solver }); scan = response.scan; previousParameters=response.previous_profile?.parameters ?? []; parameters = structuredClone(response.profile ?? scan.parameters); message = response.profile ? 'このソースと一致する保存プロファイルを適用しました。' : 'コメントから検出しました。探索範囲を確認してください。' }) }
   async function setup() { await action(async () => { environment = await post<TuneEnvironment>('environment/setup'); message = '専用環境の準備ができました。' }) }
@@ -69,7 +79,7 @@
   async function resume() { if (!detail) return; await action(async () => { await post(`studies/${detail!.study.id}/resume`, { additional_trials: additional }); additional = 0; await refresh(detail!.study.id) }) }
   async function exportSource() { if (!detail) return; await action(async () => { const result = await post<{ path: string; source: string }>(`studies/${detail!.study.id}/export`, { number: selectedTrial }); const url = URL.createObjectURL(new Blob([result.source], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = result.path.split('/').pop() ?? 'main.best.cpp'; a.click(); URL.revokeObjectURL(url); message = `保存しました: ${result.path}` }) }
   async function validate() { if (!detail) return; await action(async () => { await post(`studies/${detail!.study.id}/validate`, { input_dir: validationInput, number: selectedTrial, threads: validationThreads }); message = '別入力で現在値と候補を評価しています。'; await refresh(detail!.study.id) }) }
-  onMount(() => { void Promise.all([loadStudies(), requestJSON<TuneEnvironment>('/api/tuning/environment').then(v => environment = v)]).catch(e => message = errorMessage(e)); return () => { destroyed = true; events?.close() } })
+  onMount(() => { void Promise.all([loadStudies(), loadInputDirectories(), requestJSON<TuneEnvironment>('/api/tuning/environment').then(v => environment = v)]).catch(e => message = errorMessage(e)); return () => { destroyed = true; events?.close() } })
 </script>
 
 <div class="tuning">
@@ -91,8 +101,11 @@
     <div class="fields">
       <label>ソース<select aria-label="ソース" bind:value={solver} onchange={() => { scan = null; parameters = [] }}><option value="">選択してください</option>{#each solvers as path}<option value={path}>{path}</option>{/each}</select></label>
       <label>入力セット<select aria-label="入力セット" bind:value={inputDir}><option value="">選択してください</option>{#each inputDirectories as path}<option value={path}>{path}</option>{/each}</select></label>
+      <button disabled={busy || inputsLoading} onclick={() => action(loadInputDirectories)}>入力セットを再読込</button>
       <button disabled={busy || !solver} onclick={detect}>パラメータを検出</button>
     </div>
+    <p>入力セットは <code>ahc-plaza/inputs/</code> 直下のフォルダーから選択します。</p>
+    {#if !inputsLoading && inputDirectories.length === 0}<p>入力セットがありません。例：<code>ahc-plaza/inputs/train/0000.txt</code> を用意して再読込してください。</p>{/if}
     {#if scan}
       {#if previousParameters.length}<details open><summary>前回の保存時からソースが変更されています。以前の範囲は自動適用していません。</summary><div class="table-scroll"><table><thead><tr><th>名前</th><th>以前の宣言</th><th>現在の宣言</th><th>以前の範囲</th></tr></thead><tbody>{#each previousParameters as old}<tr><td>{old.name}</td><td>{old.type} = {old.token}</td><td>{scan.parameters.find(p=>p.name===old.name)?.token ?? '見つかりません'}</td><td>{old.low} ～ {old.high}</td></tr>{/each}</tbody></table></div></details>{/if}
       <div class="table-scroll"><table><thead><tr><th>探索</th><th>名前・型</th><th>現在値</th><th>下限</th><th>上限</th><th>刻み</th><th>対数</th></tr></thead><tbody>
@@ -124,7 +137,7 @@
       <div class="metrics"><div>現在値<strong>{number(detail.study.baseline_value)}</strong></div><div>{detail.study.best_run === detail.study.baseline_run ? '現在値が最良' : '最良値'}<strong>{number(detail.study.best_value)}</strong></div><div>現在値との差<strong>{baseline !== null && detail.study.best_value !== null ? number(detail.study.best_value - baseline) : '—'}</strong></div></div>
       <div class="actions">{#if active}<button disabled={busy} onclick={() => stop(false)}>候補の終了後に一時停止</button><button disabled={busy} onclick={() => stop(true)}>今すぐ停止</button>{:else}<label>追加試行数<input type="number" min="0" max="10000" bind:value={additional} /></label><button disabled={busy} onclick={resume}>保存したソースで再開</button>{/if}</div>
       {#if chartPoints.length}<figure><svg viewBox="0 0 780 190" role="img" aria-label="候補の目的値と最良値の推移"><line x1="35" y1="155" x2="745" y2="155" stroke="currentColor" opacity=".25" /><text x="35" y="16">{number(hi)}</text><text x="35" y="180">{number(lo)}</text><polyline points={bestLine} fill="none" stroke="var(--selection, #586f55)" stroke-width="2" />{#each chartPoints as p}<circle cx={p.x} cy={p.y} r="3" fill="currentColor"><title>Trial {p.trial.number}: {p.trial.value}</title></circle>{/each}</svg><figcaption>点：各候補の生スコア平均 ／ 線：それまでの最良値。失敗は数値に含めません。</figcaption></figure>{/if}
-      <div class="table-scroll"><table><thead><tr><th>Trial</th><th>状態</th><th>目的値</th><th>パラメータ</th><th>Run・失敗理由</th></tr></thead><tbody>{#each rows as t}<tr><td>{t.number}</td><td>{states[t.status] ?? t.status}</td><td>{number(t.value)}</td><td><code>{JSON.stringify(t.params)}</code></td><td>{#if t.run_id}<button class="link" onclick={() => onOpenRun(t.run_id)}>Runの詳細</button>{/if}{#if t.reason}<p>{t.reason}</p>{/if}{#if t.status === 'COMPLETE'}<button onclick={() => selectedTrial = t.number}>この候補を選択</button>{/if}</td></tr>{/each}</tbody></table></div>
+      <div class="table-scroll"><table><thead><tr><th>Trial</th><th>状態</th><th>目的値</th><th>パラメータ</th><th>Run・失敗理由</th></tr></thead><tbody>{#each rows as t}<tr><td>{t.number}</td><td>{states[t.status] ?? t.status}</td><td>{number(t.value)}</td><td><code>{JSON.stringify(t.params)}</code></td><td><div class="trial-actions">{#if t.run_id}<button class="link" onclick={() => onOpenRun(t.run_id)}>Runの詳細</button>{/if}{#if t.status === 'COMPLETE'}<button onclick={() => selectedTrial = t.number}>この候補を選択</button>{/if}</div>{#if t.reason}<p class="trial-reason">{t.reason}</p>{/if}</td></tr>{/each}</tbody></table></div>
       <div class="actions"><button disabled={page === 0 || refreshing} onclick={() => { page--; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>前へ</button><span>{page + 1}ページ</span><button disabled={rows.length < 50 || refreshing} onclick={() => { page++; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>次へ</button></div>
       <p>選択中：{selectedTrial === null ? '現在値を含めた最良候補' : `Trial ${selectedTrial}`}</p>
       <div class="actions"><button onclick={() => selectedTrial = null}>最良候補に戻す</button><button disabled={busy || detail.study.best_value === null} onclick={exportSource}>値を入れたC++を保存</button><button disabled={!detail.study.best_run} onclick={() => onCompare(detail!.study.baseline_run, detail!.study.best_run)}>現在値と最良候補を比較</button></div>
@@ -147,6 +160,9 @@
   button { padding: 8px 12px; border: 1px solid var(--rule); background: var(--paper-shade); color: var(--graphite); font-size: 12px; }
   input[type=checkbox] { width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; }
   button:disabled { opacity: .5; } .primary { background: var(--graphite); color: var(--paper); padding: 11px 20px; }
+  .trial-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .trial-actions button { flex: 0 0 auto; white-space: nowrap; }
+  .trial-reason { margin: 8px 0 0; }
   .link { border: 0; background: none; padding: 2px 0; text-decoration: underline; }
   details { margin: 14px 0; } summary { cursor: pointer; font-size: 13px; } .table-scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; } td, th { text-align: left; padding: 9px; border-bottom: 1px solid var(--rule); } td input[type=number] { min-width: 95px; }

@@ -132,7 +132,7 @@ func (m *Manager) Validate(ctx context.Context, id string, r ValidationRequest) 
 		return result, e
 	}
 	dir, _ := m.dir(id)
-	prepared, e := usecase.PrepareRunInputs(ctx, usecase.RunRequest{ConfigPath: m.ConfigPath, InputDir: r.InputDir}, filepath.Join(dir, "validations", validationID))
+	prepared, e := usecase.PrepareTuningInputs(ctx, usecase.RunRequest{ConfigPath: m.ConfigPath, InputDir: r.InputDir}, filepath.Join(dir, "validations", validationID))
 	if e != nil {
 		return result, e
 	}

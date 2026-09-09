@@ -76,11 +76,18 @@ func listRegularFiles(root, directory, extension string) ([]string, error) {
 }
 
 func (s *Server) handleInputDirectories(w http.ResponseWriter, r *http.Request) {
+	s.listInputDirectories(w, r, "")
+}
+
+func (s *Server) listInputDirectories(w http.ResponseWriter, r *http.Request, rootOverride string) {
 	cfg, err := config.Load(s.ConfigPath)
 	if writeErrorIf(w, http.StatusInternalServerError, err) {
 		return
 	}
 
+	if rootOverride != "" {
+		cfg.File.Execution.DefaultInputDir = rootOverride
+	}
 	inputRoot, err := cfg.InputDir("")
 	if writeErrorIf(w, http.StatusInternalServerError, err) {
 		return

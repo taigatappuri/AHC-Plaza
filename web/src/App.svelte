@@ -381,14 +381,14 @@
         </section>
 
       {:else if activeTab === 'tuning'}
-        <TuningPage {solvers} {inputDirectories} objective={configData?.project.objective ?? 'max'} onOpenRun={openTuningRun} onCompare={compareTuningRuns} />
+        <TuningPage {solvers} objective={configData?.project.objective ?? 'max'} onOpenRun={openTuningRun} onCompare={compareTuningRuns} />
       {:else if activeTab === 'input'}
         <InputCreatePage generators={inputGenerators} {inputGeneratorLoading} error={inputGeneratorError} result={inputGenerationResult} defaultOutputDir={configData?.execution.default_input_dir ?? 'ahc-plaza/inputs'} loading={inputGenerating} onGenerate={generateInputCases} />
       {:else if activeTab === 'detail'}
         {#if showingRunDetail}
           <RunDetail {selectedRun} {caseResults} {runStatistics} {featureData} {source} {logs} {runError} onCancel={cancelRun} onBack={() => showingRunDetail = false} onUpdateComment={updateRunComment} onConfigureInputFormat={configureInputFormat} />
         {:else}
-          <label><input type="checkbox" bind:checked={includeTuning} onchange={refreshRuns} /> チューニングを含む</label>
+          <label class="history-tuning-toggle"><input type="checkbox" bind:checked={includeTuning} onchange={refreshRuns} /> チューニングを含む</label>
           <RunTable bind:query={runQuery} {runs} selectedRunId={selectedRun?.id ?? ''} onSelect={openRunDetail} />
         {/if}
       {:else if activeTab === 'compare'}

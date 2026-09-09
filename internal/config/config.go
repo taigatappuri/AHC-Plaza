@@ -233,6 +233,8 @@ func (c Config) InputDir(relativeOverride string) (string, error) {
 	return c.ResolveProjectPath("input_dir", relative)
 }
 
+const TuningInputRoot = "ahc-plaza/inputs"
+
 // InputSetDir は入力セットとして扱える、入力ルート直下のディレクトリを返します。
 func (c Config) InputSetDir(relativeOverride string) (string, error) {
 	inputRoot, err := c.InputDir("")

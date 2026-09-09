@@ -140,3 +140,23 @@ measure_time = true
 	}
 	return root
 }
+
+func TestPrepareTuningInputsUsesFixedRoot(t *testing.T) {
+	root := newTestProject(t, "exit 0")
+	configPath := filepath.Join(root, "ahc-plaza.toml")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(configPath, []byte(strings.ReplaceAll(string(content), "ahc-plaza/inputs", "other-inputs")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := PrepareTuningInputs(context.Background(), RunRequest{ConfigPath: configPath, InputDir: "ahc-plaza/inputs/cases"}, filepath.Join(root, "fixed"))
+	if err != nil || len(prepared.Inputs) != 2 {
+		t.Fatalf("inputs=%v err=%v", prepared.Inputs, err)
+	}
+	_, err = PrepareTuningInputs(context.Background(), RunRequest{ConfigPath: configPath, InputDir: "other-inputs/outside"}, filepath.Join(root, "rejected"))
+	if err == nil {
+		t.Fatal("accepted an input set outside ahc-plaza/inputs")
+	}
+}
