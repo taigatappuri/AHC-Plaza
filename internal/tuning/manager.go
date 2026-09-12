@@ -411,7 +411,7 @@ func (m *Manager) run(ctx context.Context, a *activity, s *domain.TuningStudy, v
 			if readErr != nil || evalErr != nil || run.Status != domain.RunSucceeded {
 				retry, active := baselineRetryClassification(run.Status)
 				if !retry {
-					fail(fmt.Errorf("現在値の保存結果が不完全です"))
+					fail(fmt.Errorf("デフォルト値の保存結果が不完全です"))
 					return
 				}
 				if active {
@@ -431,7 +431,7 @@ func (m *Manager) run(ctx context.Context, a *activity, s *domain.TuningStudy, v
 				}
 				value, e = m.evaluate(ctx, *s, v, s.BaselineRun, nil)
 				if e != nil {
-					fail(fmt.Errorf("現在値の評価に失敗: %w", e))
+					fail(fmt.Errorf("デフォルト値の評価に失敗: %w", e))
 					return
 				}
 			}
@@ -439,7 +439,7 @@ func (m *Manager) run(ctx context.Context, a *activity, s *domain.TuningStudy, v
 		} else if errors.Is(e, sql.ErrNoRows) {
 			value, e := m.evaluate(ctx, *s, v, s.BaselineRun, nil)
 			if e != nil {
-				fail(fmt.Errorf("現在値の評価に失敗: %w", e))
+				fail(fmt.Errorf("デフォルト値の評価に失敗: %w", e))
 				return
 			}
 			s.BaselineValue = &value

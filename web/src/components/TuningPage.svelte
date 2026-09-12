@@ -28,7 +28,7 @@
   $: chartPoints = history.filter(t => t.value !== null && t.status === 'COMPLETE').map(t => ({ x: 35 + (t.number + 1) / chartCount * 710, y: 155 - ((t.value! - lo) / (hi - lo || 1)) * 130, trial: t }))
   $: bestLine = buildBestLine(history, baseline)
   $: active = detail?.active ?? false
-  const states: Record<string, string> = { preparing: '準備・現在値を評価中', running: '候補を評価中', stopping: '停止処理中', paused: '一時停止', completed: '完了', failed: '失敗', COMPLETE: '成功', FAIL: '失敗', RUNNING: '評価中', cancelled: '中断' }
+  const states: Record<string, string> = { preparing: '準備・デフォルト値を評価中', running: '候補を評価中', stopping: '停止処理中', paused: '一時停止', completed: '完了', failed: '失敗', COMPLETE: '成功', FAIL: '失敗', RUNNING: '評価中', cancelled: '中断' }
   const mb = (bytes: number) => `${(bytes / 1e6).toFixed(1)} MB`
   const number = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString(undefined, { maximumSignificantDigits: 7 })
   function buildBestLine(items: TuneTrial[], base: number | null) {
@@ -106,7 +106,7 @@
     {#if !inputsLoading && inputDirectories.length === 0}<p>入力セットがありません。例：<code>ahc-plaza/inputs/train/0000.txt</code> を用意して再読込してください。</p>{/if}
     {#if scan}
       {#if previousParameters.length}<details open><summary>前回の保存時からソースが変更されています。以前の範囲は自動適用していません。</summary><div class="table-scroll"><table><thead><tr><th>名前</th><th>以前の宣言</th><th>現在の宣言</th><th>以前の範囲</th></tr></thead><tbody>{#each previousParameters as old}<tr><td>{old.name}</td><td>{old.type} = {old.token}</td><td>{scan.parameters.find(p=>p.name===old.name)?.token ?? '見つかりません'}</td><td>{old.low} ～ {old.high}</td></tr>{/each}</tbody></table></div></details>{/if}
-      <div class="table-scroll"><table><thead><tr><th>探索</th><th>名前・型</th><th>現在値</th><th>下限</th><th>上限</th><th>刻み</th><th>対数</th></tr></thead><tbody>
+      <div class="table-scroll"><table><thead><tr><th>探索</th><th>名前・型</th><th>デフォルト値</th><th>下限</th><th>上限</th><th>刻み</th><th>対数</th></tr></thead><tbody>
         {#each parameters as p}<tr><td><input type="checkbox" aria-label={`${p.name}を探索`} bind:checked={p.enabled} /></td><td><button class="link" onclick={() => { const line = document.getElementById(`tune-source-${p.line}`); const block = line?.closest("details"); if (block) block.open = true; line?.scrollIntoView({ block: "center" }) }}>{p.name}</button><small>{p.type} · {p.line}行</small></td><td>{number(p.current)}</td>
           <td><input type="number" step="any" aria-label={`${p.name}の下限`} value={p.low ?? ''} oninput={e => { p.low = e.currentTarget.value === '' ? null : +e.currentTarget.value; parameters = parameters }} /></td>
           <td><input type="number" step="any" aria-label={`${p.name}の上限`} value={p.high ?? ''} oninput={e => { p.high = e.currentTarget.value === '' ? null : +e.currentTarget.value; parameters = parameters }} /></td>
@@ -118,7 +118,7 @@
     {/if}
     <div class="fields"><label>追加候補の試行回数<input type="number" min="1" max="10000" bind:value={trials} /></label><p>目的値：生スコア平均（{objective === 'min' ? '最小化' : '最大化'}）</p></div>
     <details><summary>詳細設定</summary><div class="fields"><label>ケース並列数（0＝自動）<input type="number" min="0" max="256" bind:value={threads} /></label><label>タイムアウト ms（0＝設定値）<input type="number" min="0" bind:value={timeoutMS} /></label><label>Optuna seed<input type="number" min="0" bind:value={seed} /></label></div></details>
-    <p>{trials || 0}候補 × {caseCount ?? "—"}ケース、加えて現在値{caseCount ?? "—"}ケースを評価します。失敗候補も回数に含みます。候補ごとに再コンパイルします。</p>
+    <p>{trials || 0}候補 × {caseCount ?? "—"}ケース、加えてデフォルト値{caseCount ?? "—"}ケースを評価します。失敗候補も回数に含みます。候補ごとに再コンパイルします。</p>
     <button class="primary" disabled={busy || active || incomplete || !environment?.available || !inputDir || !trials || caseCount === 0} onclick={start}>{busy ? '準備中…' : 'チューニングを開始'}</button>
   </section>
 
@@ -130,15 +130,15 @@
       <div class="heading"><h2>{states[detail.study.status] ?? detail.study.status}</h2><span>{detail.study.completed + detail.study.failed} / {detail.study.trials}候補</span></div>
       {#if detail.study.error}<p class="notice">{detail.study.error}</p>{#if detail.worker_log}<details><summary>Optunaのログ</summary><pre>{detail.worker_log}</pre></details>{/if}{/if}
       <p>成功 {detail.study.completed} · 失敗 {detail.study.failed} · 経過時間 {Math.round(detail.study.elapsed)}秒 · 使用容量 {mb(detail.usage_bytes)}</p>
-      <p>推定残り時間：{detail.study.completed + detail.study.failed > 0 ? `${Math.ceil(detail.study.elapsed / (detail.study.completed + detail.study.failed + 1) * Math.max(0, detail.study.trials - detail.study.completed - detail.study.failed))}秒（ビルドを含む概算）` : "現在値の評価後に算出"}</p>
+      <p>推定残り時間：{detail.study.completed + detail.study.failed > 0 ? `${Math.ceil(detail.study.elapsed / (detail.study.completed + detail.study.failed + 1) * Math.max(0, detail.study.trials - detail.study.completed - detail.study.failed))}秒（ビルドを含む概算）` : "デフォルト値の評価後に算出"}</p>
       <p>固定条件：{detail.manifest.request.solver} / {detail.manifest.request.input_dir} / {detail.manifest.prepared.inputs.length}ケース / 並列 {detail.manifest.request.threads} / {detail.manifest.request.timeout_ms} ms</p>
-      <div class="metrics"><div>現在値<strong>{number(detail.study.baseline_value)}</strong></div><div>{detail.study.best_run === detail.study.baseline_run ? '現在値が最良' : '最良値'}<strong>{number(detail.study.best_value)}</strong></div><div>現在値との差<strong>{baseline !== null && detail.study.best_value !== null ? number(detail.study.best_value - baseline) : '—'}</strong></div></div>
+      <div class="metrics"><div>デフォルト値<strong>{number(detail.study.baseline_value)}</strong></div><div>{detail.study.best_run === detail.study.baseline_run ? 'デフォルト値が最良' : '最良値'}<strong>{number(detail.study.best_value)}</strong></div><div>デフォルト値との差<strong>{baseline !== null && detail.study.best_value !== null ? number(detail.study.best_value - baseline) : '—'}</strong></div></div>
       <div class="actions">{#if active}<button disabled={busy} onclick={() => stop(false)}>候補の終了後に一時停止</button><button disabled={busy} onclick={() => stop(true)}>今すぐ停止</button>{:else}<label>追加試行数<input type="number" min="0" max="10000" bind:value={additional} /></label><button disabled={busy} onclick={resume}>保存したソースで再開</button>{/if}</div>
       {#if chartPoints.length}<figure><svg viewBox="0 0 780 190" role="img" aria-label="候補の目的値と最良値の推移"><line x1="35" y1="155" x2="745" y2="155" stroke="currentColor" opacity=".25" /><text x="35" y="16">{number(hi)}</text><text x="35" y="180">{number(lo)}</text><polyline points={bestLine} fill="none" stroke="var(--selection, #586f55)" stroke-width="2" />{#each chartPoints as p}<circle cx={p.x} cy={p.y} r="3" fill="currentColor"><title>Trial {p.trial.number}: {p.trial.value}</title></circle>{/each}</svg><figcaption>点：各候補の生スコア平均 ／ 線：それまでの最良値。失敗は数値に含めません。</figcaption></figure>{/if}
       <div class="table-scroll"><table><thead><tr><th>Trial</th><th>状態</th><th>目的値</th><th>パラメータ</th><th>Run・失敗理由</th></tr></thead><tbody>{#each rows as t}<tr><td>{t.number}</td><td>{states[t.status] ?? t.status}</td><td>{number(t.value)}</td><td><code>{JSON.stringify(t.params)}</code></td><td><div class="trial-actions">{#if t.run_id}<button class="link" onclick={() => onOpenRun(t.run_id)}>Runの詳細</button>{/if}{#if t.status === 'COMPLETE'}<button onclick={() => selectedTrial = t.number}>保存対象にする</button>{/if}</div>{#if t.reason}<p class="trial-reason">{t.reason}</p>{/if}</td></tr>{/each}</tbody></table></div>
       <div class="actions"><button disabled={page === 0 || refreshing} onclick={() => { page--; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>前へ</button><span>{page + 1}ページ</span><button disabled={rows.length < 50 || refreshing} onclick={() => { page++; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>次へ</button></div>
-      <p>選択中：{selectedTrial === null ? '現在値を含めた最良候補' : `Trial ${selectedTrial}`}</p>
-      <div class="actions"><button onclick={() => selectedTrial = null}>最良候補に戻す</button><button disabled={busy || detail.study.best_value === null} onclick={exportSource}>値を入れたC++を保存</button><button disabled={!detail.study.best_run} onclick={() => onCompare(detail!.study.baseline_run, detail!.study.best_run)}>現在値と最良候補を比較</button></div>
+      <p>選択中：{selectedTrial === null ? 'デフォルト値を含めた最良候補' : `Trial ${selectedTrial}`}</p>
+      <div class="actions"><button onclick={() => selectedTrial = null}>最良候補に戻す</button><button disabled={busy || detail.study.best_value === null} onclick={exportSource}>値を入れたC++を保存</button><button disabled={!detail.study.best_run} onclick={() => onCompare(detail!.study.baseline_run, detail!.study.best_run)}>デフォルト値と最良候補を比較</button></div>
     </section>
   {/if}
 </div>

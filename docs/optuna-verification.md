@@ -22,7 +22,7 @@ MBは10進表記です。展開環境はプロジェクトごとに保存しま�
 - `go test -race -tags tuning_bundle ./internal/tuning/... ./internal/store ./internal/server ./internal/process`: 実workerを含むrace検査。
 - `make release`: amd64・arm64の同梱バイナリとチェックサムを生成。
 - `python3 scripts/tuning/smoke.py --binary ./ahc-plaza --trials 100`: 実C++・pahcer・Optunaで2パラメータを探索。通常Run、最良C++の書き出しと再評価、元ソース・入力の変更、追加試行、停止・SIGKILL後の復旧を確認。計112候補中110成功、意図的中断2件。未配信outboxとOptunaの未完了Trialが残らないことを確認。
-- 同じスクリプトで最小化、全候補のビルド失敗、5連続失敗時の停止、現在値が最良の場合、固定資材の改変拒否、専用環境だけの削除を確認。
+- 同じスクリプトで最小化、全候補のビルド失敗、5連続失敗時の停止、デフォルト値が最良の場合、固定資材の改変拒否、専用環境だけの削除を確認。
 - PythonのないPATHで未展開の通常Run・doctorと探索を確認。別途、Python未導入のUbuntu 24.04コンテナを`--network none`で起動し、同梱環境の展開とNumPy・SQLAlchemy・Optunaのimportを確認。
 - Chromiumで検出、プロファイル保存、探索開始・完了、C++ダウンロードを確認。最終バイナリでも2パラメータ・2試行とダウンロードを確認。
 - パーサーのCRLF・文字列・コメント・行継続・定数式のコンパイル、整数精度・float丸め、結果の欠落・重複seed・WA/TLE・負値・ゼロ、別プロセスグループの子孫停止を個別に検証。
