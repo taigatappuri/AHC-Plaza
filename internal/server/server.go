@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/taigatappuri/AHC-Plaza/internal/inputfeature"
+	"github.com/taigatappuri/AHC-Plaza/internal/process"
 	"github.com/taigatappuri/AHC-Plaza/internal/store"
+	"github.com/taigatappuri/AHC-Plaza/internal/tuning"
 )
 
 //go:embed static
@@ -22,19 +24,22 @@ type Server struct {
 	Root          string
 	ConfigPath    string
 	Store         *store.SQLiteStore
+	Tuning        *tuning.Manager
 	featureRunner *inputfeature.Runner
 
-	mu           sync.Mutex
-	visualizerMu sync.Mutex
-	runWG        sync.WaitGroup
-	closeOnce    sync.Once
-	closeErr     error
-	closing      bool
-	cancels      map[string]context.CancelFunc
-	failures     map[string]string
+	mu            sync.Mutex
+	visualizerMu  sync.Mutex
+	runWG         sync.WaitGroup
+	closeOnce     sync.Once
+	closeErr      error
+	unlockProject func()
+	closing       bool
+	cancels       map[string]context.CancelFunc
+	failures      map[string]string
 }
 
-func New(root, configPath string) (*Server, error) {
+func New(root, configPath string) (*Server, error) { return NewWithVersion(root, configPath, "dev") }
+func NewWithVersion(root, configPath, version string) (*Server, error) {
 	absoluteRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("could not resolve the project root: %w", err)
@@ -45,6 +50,16 @@ func New(root, configPath string) (*Server, error) {
 	} else if !filepath.IsAbs(configPath) {
 		configPath = filepath.Join(root, configPath)
 	}
+	unlock, err := process.LockProject(root)
+	if err != nil {
+		return nil, err
+	}
+	success := false
+	defer func() {
+		if !success {
+			unlock()
+		}
+	}()
 	database, err := store.OpenSQLite(filepath.Join(root, "ahc-plaza", "ahc-plaza.db"))
 	if err != nil {
 		return nil, err
@@ -58,18 +73,30 @@ func New(root, configPath string) (*Server, error) {
 		database.Close()
 		return nil, err
 	}
-	return &Server{Root: root, ConfigPath: configPath, Store: database, featureRunner: featureRunner, cancels: make(map[string]context.CancelFunc), failures: make(map[string]string)}, nil
+	manager, err := tuning.NewManager(root, configPath, version, database)
+	if err != nil {
+		database.Close()
+		return nil, err
+	}
+	success = true
+	return &Server{Tuning: manager, unlockProject: unlock, Root: root, ConfigPath: configPath, Store: database, featureRunner: featureRunner, cancels: make(map[string]context.CancelFunc), failures: make(map[string]string)}, nil
 }
 
 func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
 		s.BeginShutdown()
 		s.runWG.Wait()
+		if s.Tuning != nil {
+			s.Tuning.Close()
+		}
 		s.mu.Lock()
 		s.cancels = make(map[string]context.CancelFunc)
 		s.failures = make(map[string]string)
 		s.mu.Unlock()
 		s.closeErr = s.Store.Close()
+		if s.unlockProject != nil {
+			s.unlockProject()
+		}
 	})
 	return s.closeErr
 }
@@ -77,6 +104,9 @@ func (s *Server) Close() error {
 // BeginShutdown は新しいRunの受付を止め、実行中のRunへ停止を要求します。
 // DBはCloseでRunの後処理完了を待ってから閉じます。
 func (s *Server) BeginShutdown() {
+	if s.Tuning != nil {
+		s.Tuning.BeginShutdown()
+	}
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
@@ -126,6 +156,9 @@ func (s *Server) runFailure(runID string) string {
 // Handler はAPIと埋め込み済みフロントエンドを同じHTTPサーバーへ登録します。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
+		mux.HandleFunc(method+" /api/tuning/", s.handleTuning)
+	}
 	for _, method := range []string{"GET", "POST", "PUT"} {
 		mux.HandleFunc(method+" /api/runs", s.handleRuns)
 		mux.HandleFunc(method+" /api/runs/", s.handleRun)

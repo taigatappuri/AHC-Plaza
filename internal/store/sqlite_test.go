@@ -4,12 +4,63 @@ import (
 	"context"
 	"database/sql"
 	"math"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/taigatappuri/AHC-Plaza/internal/domain"
 )
+
+func TestSaveStudyWaitsForExternalReader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "study ?#日本語.db")
+	store, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.SaveStudy(ctx, domain.TuningStudy{ID: "s", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	dsn := url.URL{Scheme: "file", Path: path}
+	reader, err := sql.Open("sqlite", dsn.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	tx, err := reader.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var status string
+	if err := tx.QueryRow("SELECT status FROM tuning_studies WHERE id='s'").Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- store.SaveStudy(ctx, domain.TuningStudy{ID: "s", Status: "completed"}) }()
+	select {
+	case err := <-done:
+		t.Fatalf("writer returned before reader released its lock: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("writer did not resume after the reader released its lock")
+	}
+	study, err := store.GetStudy(ctx, "s")
+	if err != nil || study.Status != "completed" {
+		t.Fatal(study, err)
+	}
+}
 
 func TestSQLiteStoreMigratesLegacyTimeoutSeconds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ahc-plaza.db")

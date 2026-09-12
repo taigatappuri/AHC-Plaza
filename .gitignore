@@ -10,3 +10,10 @@
 .idea/
 .vscode/
 /.agents/
+
+/internal/tuning/runtime/assets/*.tar.gz
+/internal/tuning/runtime/assets/*.json
+
+/internal/tuning/runtime/assets/downloads/
+
+/scripts/tuning/__pycache__/

@@ -76,11 +76,18 @@ func listRegularFiles(root, directory, extension string) ([]string, error) {
 }
 
 func (s *Server) handleInputDirectories(w http.ResponseWriter, r *http.Request) {
+	s.listInputDirectories(w, r, "")
+}
+
+func (s *Server) listInputDirectories(w http.ResponseWriter, r *http.Request, rootOverride string) {
 	cfg, err := config.Load(s.ConfigPath)
 	if writeErrorIf(w, http.StatusInternalServerError, err) {
 		return
 	}
 
+	if rootOverride != "" {
+		cfg.File.Execution.DefaultInputDir = rootOverride
+	}
 	inputRoot, err := cfg.InputDir("")
 	if writeErrorIf(w, http.StatusInternalServerError, err) {
 		return
@@ -142,7 +149,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		limit := 100
-		runs, err := s.Store.ListRunSummaries(r.Context(), limit)
+		runs, err := s.Store.ListRunSummariesWithTuning(r.Context(), limit, r.URL.Query().Get("include_tuning") == "true")
 		if writeErrorIf(w, http.StatusInternalServerError, err) {
 			return
 		}
@@ -182,8 +189,7 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		_, runErr := usecase.ExecuteRunWithStore(ctx, input, s.Store)
 		if runErr != nil {
 			s.recordRunFailure(runID, runErr)
-			finishedAt := time.Now().UTC()
-			_ = s.Store.UpdateRunStatus(context.Background(), runID, domain.RunFailed, &finishedAt)
+			_ = s.Store.FailActiveRun(context.Background(), runID)
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"run_id": runID, "status": string(domain.RunQueued)})
@@ -442,6 +448,12 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request, runID stri
 }
 
 func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request, runID string) {
+	if run, err := s.Store.GetRun(r.Context(), runID); err == nil && run.TuningStudy != "" && (run.Status == domain.RunRunning || run.Status == domain.RunQueued) {
+		if !writeErrorIf(w, http.StatusConflict, s.Tuning.Pause(run.TuningStudy, true)) {
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping"})
+		}
+		return
+	}
 	s.mu.Lock()
 	cancel, ok := s.cancels[runID]
 	s.mu.Unlock()

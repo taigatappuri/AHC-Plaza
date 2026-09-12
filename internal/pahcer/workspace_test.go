@@ -109,3 +109,57 @@ func TestPrepareWorkspaceAcceptsExamplePahcerConfig(t *testing.T) {
 		t.Fatalf("example config was not rewritten: %s", configured)
 	}
 }
+
+func TestPrepareWorkspaceOverlaysCandidateOnFixedProject(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "fixed-project")
+	if err := os.MkdirAll(filepath.Join(project, "include"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(project, "include", "lib.hpp"), []byte("header"), 0644)
+	os.WriteFile(filepath.Join(project, "Makefile"), []byte("all:"), 0644)
+	os.MkdirAll(filepath.Join(project, "solver"), 0755)
+	os.WriteFile(filepath.Join(project, "solver", "main.cpp"), []byte("old"), 0644)
+	candidate := filepath.Join(root, "candidate.cpp")
+	os.WriteFile(candidate, []byte("new"), 0644)
+	tools := filepath.Join(root, "tools")
+	os.MkdirAll(tools, 0755)
+	setting := filepath.Join(root, "pahcer.toml")
+	os.WriteFile(setting, []byte("[test]\n[[test.test_steps]]\nprogram=\"./solver/main\"\nstdin=\"x\"\n"), 0644)
+	input := filepath.Join(root, "input.txt")
+	os.WriteFile(input, []byte("x"), 0644)
+	w, err := PrepareWorkspace(filepath.Join(root, "run"), candidate, tools, setting, []domain.InputCase{{ID: "0", Path: input}}, WorkspaceOptions{Threads: 1, CaseTimeoutMilliseconds: 1, CaseRunner: "runner", ProjectDir: project, SourceTarget: "solver/main.cpp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(w.Dir, "solver", "main.cpp"))
+	if string(got) != "new" {
+		t.Fatalf("candidate=%q", got)
+	}
+	if _, err := os.Stat(filepath.Join(w.Dir, "include", "lib.hpp")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrepareWorkspaceCandidateWinsInsideTools(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	tools := filepath.Join(root, "tools")
+	os.MkdirAll(project, 0755)
+	os.MkdirAll(tools, 0755)
+	os.WriteFile(filepath.Join(tools, "solver.cpp"), []byte("tools"), 0644)
+	candidate := filepath.Join(root, "candidate.cpp")
+	os.WriteFile(candidate, []byte("candidate"), 0644)
+	setting := filepath.Join(root, "p.toml")
+	os.WriteFile(setting, []byte("[test]\n[[test.test_steps]]\nprogram=\"./solver\"\nstdin=\"x\"\n"), 0644)
+	input := filepath.Join(root, "in")
+	os.WriteFile(input, []byte("x"), 0644)
+	w, err := PrepareWorkspace(filepath.Join(root, "run"), candidate, tools, setting, []domain.InputCase{{ID: "0", Path: input}}, WorkspaceOptions{Threads: 1, CaseTimeoutMilliseconds: 1, CaseRunner: "runner", ProjectDir: project, SourceTarget: "tools/solver.cpp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(w.Dir, "tools", "solver.cpp"))
+	if string(got) != "candidate" {
+		t.Fatalf("got %q", got)
+	}
+}

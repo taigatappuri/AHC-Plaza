@@ -3,6 +3,7 @@ import type { ConfigData } from './types'
 export const cloneConfig = (value: ConfigData): ConfigData => {
   const cloned = JSON.parse(JSON.stringify(value)) as ConfigData
   cloned.input_format.features ??= []
+  cloned.tuning ??= { source_target: '' }
   return cloned
 }
 
@@ -37,6 +38,11 @@ export function validateConfig(value: ConfigData) {
   for (const [key, path, label] of paths) {
     const error = validateRelativePath(path, label)
     if (error) errors[key] = error
+  }
+
+  if (value.tuning.source_target.trim()) {
+    const error = validateRelativePath(value.tuning.source_target, '調整対象ソース')
+    if (error) errors['tuning.source_target'] = error
   }
 
   if (!Number.isInteger(value.execution.threads) || value.execution.threads < 0) {

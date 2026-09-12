@@ -9,6 +9,7 @@ AHC Plaza は [pahcer](https://github.com/terry-u16/pahcer) と連携して AtCo
 - 公式ジェネレータを使った入力ケース生成
 - AtCoder公式ビジュアライザのローカル表示
 - ソースファイル実行とソーススナップショット保存
+- C++定数のOptunaチューニング（Python環境を同梱）
 - ケースごとのスコア・実行時間・ログの確認
 - 実行間の統計比較と入力条件による絞り込み
 
@@ -31,6 +32,48 @@ AHC Plaza は [pahcer](https://github.com/terry-u16/pahcer) と連携して AtCo
 - `g++`
 - Rust / Cargo
 - [pahcer](https://github.com/terry-u16/pahcer)
+
+## Optunaによるチューニング
+
+調整したいグローバル定数にコメントを付けます。
+
+```cpp
+constexpr int BEAM_WIDTH = 50;        // @tune 10 200
+constexpr double START_TEMP = 100.0;  // @tune 1 1000 log
+```
+
+GUIの「チューニング」でソースと入力セットを選び、「パラメータを検出」から探索範囲を確認して開始します。デフォルト値を評価した後、指定した回数だけ追加候補を試します。各候補はソースのコピーの初期値だけを変更して再コンパイルします。元ファイルは変更しません。
+Sampler には TPESampler を利用します。
+
+探索用の入力セットは、`ahc-plaza/inputs/`直下のフォルダーから選択します（例：`ahc-plaza/inputs/in/0000.txt`）。
+
+- 目的値は固定ケースの**生スコア平均**です。最大化・最小化はプロジェクト設定に従います。
+- WA・TLE・コンパイル失敗・結果の欠落は失敗Trialとし、最良値の計算に含めません。5回連続失敗で探索を停止します。
+- 最良候補にはデフォルト値も含みます。「値を入れたC++を保存」で単独のC++を取得できます。
+- 「候補の終了後に一時停止」と「今すぐ停止」を選べます。ブラウザを閉じてもサーバーが動いていれば継続します。
+- 再開は保存した原本・入力・設定を使います。元ソースを編集しても探索に影響しません。探索範囲やソースを変える場合は新しいStudyを開始してください。
+- TrialのRunは通常履歴から除外されます。「チューニング時の実行を含む」で表示できます。通常Runとチューニングの重い評価は同一プロジェクト内で直列に実行します。
+- 評価後は再ビルド用の複製を自動削除し、ソース・ログ・ケース入出力・可視化用結果は保持します。完了または一時停止したStudyは、表示された使用容量を確認してGUIから関連Runごと削除できます。
+
+
+調整対象は、選択したsolverとcompile引数から推定します。複数のC++ソースがあり推定できない場合は、設定に対象のworkspace相対pathを指定してください。
+
+```toml
+[tuning]
+source_target = "solver/main.cpp"
+```
+
+### Python環境と容量
+
+**Pythonの事前インストール・pip・uvの操作は不要です。** 配布バイナリに専用CPython 3.12.14、Optuna 5.0.0と必須依存を同梱しています。初回チューニング時にオフラインで自動展開し、システムPythonやPATHは変更しません。
+
+GUIを終了してから、不要な専用環境を削除できます。旧バージョンの専用環境もまとめて削除します。探索履歴と実行結果は残り、同梱されている版は次の利用時に再展開できます。
+
+```sh
+ahc-plaza tune clean-runtime
+```
+
+Studyは`ahc-plaza/tuning/`、各評価Runは`ahc-plaza/runs/`へ保存します。実行中のファイルを手動で削除しないでください。同梱環境が更新されると既存Studyの再開を拒否する場合があります。その場合は保存時のPlazaを使用するか、新しいStudyを開始します。ソースの書き出しや保存済み結果の閲覧は引き続き利用できます。
 
 ## インストール
 
@@ -125,3 +168,27 @@ ahc-plaza gui --port 8080
 ## ライセンス
 
 AHC Plaza は[MIT License](./LICENSE)で公開しています。第三者著作物のライセンスは[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)を参照してください。
+
+## 開発・配布ビルド
+
+通常の開発チェックは`make check`です。資材を同梱しない`go build ./cmd/ahc-plaza`でも通常機能は動きますが、チューニングは未同梱と表示されます。
+
+```sh
+make web-install
+make check
+make build      # 現在のCPU向けPython環境を取得・同梱
+make release    # amd64 / arm64をそれぞれ同梱
+```
+
+同梱ビルドには開発者側でPython 3.12以上とuvが必要です。ビルド時だけ、固定SHA-256のPython配布物と、ハッシュ付き`requirements.lock`のwheelを取得します。資材はGit管理外の`internal/tuning/runtime/assets/`に保存します。**利用者側ではこのビルド操作や環境構築は不要です。**
+
+```sh
+go test -tags tuning_bundle ./internal/tuning/...
+python3 scripts/tuning/smoke.py --binary ./ahc-plaza --trials 100
+```
+
+後者にはg++とpahcerが必要です。一時プロジェクトでシステムPythonのないPATH、実Optuna、停止・強制終了・再開、固定条件、書き出しを確認します。amd64/arm64の同梱workerテストはCIにも定義しています。
+
+容量の実測、工程別ベンチマーク、確認した環境と未確認の範囲は[実装の検証記録](docs/optuna-verification.md)を参照してください。
+
+Pythonと依存の更新時は`scripts/tuning/python-lock.json`・`requirements.lock`を更新し、両CPUの同梱テスト、通常機能の回帰テスト、容量とライセンスの確認を行います。版固定はセキュリティ更新を止める方針ではありません。同梱物の一覧と第三者ライセンスについては[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)を参照してください。

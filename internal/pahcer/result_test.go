@@ -1,6 +1,7 @@
 package pahcer
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,5 +37,15 @@ func TestResultCaseTimedOut(t *testing.T) {
 	failed := ResultCase{ErrorMessage: `Failed to run (exit status: 1). command: "ahc-plaza" "case-exec"`}
 	if failed.TimedOut() {
 		t.Fatal("通常の実行エラーをTLEとして検出しました")
+	}
+}
+
+func TestResultRejectsMissingSeedAndMarksMissingScore(t *testing.T) {
+	var value ResultCase
+	if err := json.Unmarshal([]byte(`{"score":1}`), &value); err == nil {
+		t.Fatal("missing seed accepted")
+	}
+	if err := json.Unmarshal([]byte(`{"seed":0,"score":null}`), &value); err != nil || !value.MissingScore {
+		t.Fatal(value, err)
 	}
 }

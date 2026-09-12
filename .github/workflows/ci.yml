@@ -27,7 +27,31 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.7"
       - run: npm ci
         working-directory: web
       - run: make check
       - run: make build
+
+  tuning-runtime:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.7"
+      - run: make tuning-runtime ARCH=${{ matrix.arch }}
+      - run: go test -tags tuning_bundle ./internal/tuning/...

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -15,19 +16,26 @@ import (
 )
 
 type SQLiteStore struct {
-	db *sql.DB
+	db        *sql.DB
+	execution chan struct{}
 }
 
 func OpenSQLite(path string) (*SQLiteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("could not create database directory: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	// 接続が張り直されても短時間の競合を待機し、書込み前のロック昇格を避けます。
+	dsn := url.URL{Scheme: "file", Path: absolute, RawQuery: "_pragma=busy_timeout%285000%29&_txlock=immediate"}
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, fmt.Errorf("could not open SQLite database: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	store := &SQLiteStore{db: db}
+	store := &SQLiteStore{db: db, execution: make(chan struct{}, 1)}
 	if err := store.migrate(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -55,12 +63,12 @@ func (s *SQLiteStore) SaveRun(ctx context.Context, run domain.Run) error {
 	INSERT INTO runs (
   id, run_number, problem, objective, solver_path, input_dir, input_cases_hash,
   source_path, source_hash, config_hash, pahcer_version, compiler_version,
-  threads, timeout_ms, status, comment, created_at, started_at, finished_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  threads, timeout_ms, status, comment, created_at, started_at, finished_at, tuning_study
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `, run.ID, runNumber, run.Problem, run.Objective, run.SolverPath, run.InputDir, run.InputCasesHash,
 			run.SourcePath, run.SourceHash, run.ConfigHash, run.PahcerVersion, run.CompilerVersion,
 			run.Threads, run.TimeoutMilliseconds, string(run.Status), run.Comment,
-			formatTime(run.CreatedAt), formatTime(run.StartedAt), formatOptionalTime(run.FinishedAt))
+			formatTime(run.CreatedAt), formatTime(run.StartedAt), formatOptionalTime(run.FinishedAt), run.TuningStudy)
 		return err
 	})
 }
@@ -68,11 +76,11 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (domain.Run, error)
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, run_number, problem, objective, solver_path, input_dir, input_cases_hash,
        source_path, source_hash, config_hash, pahcer_version, compiler_version,
-       threads, timeout_ms, status, comment, created_at, started_at, finished_at
+       threads, timeout_ms, status, comment, created_at, started_at, finished_at, tuning_study
 FROM runs WHERE id = ?
 `, id)
 	var run domain.Run
-	err := scanRunColumns(row, &run)
+	err := scanRunColumns(row, &run, &run.TuningStudy)
 	return run, err
 }
 
@@ -169,6 +177,9 @@ func (s *SQLiteStore) transaction(ctx context.Context, action func(*sql.Tx) erro
 // ListRunSummaries はRun一覧に必要な集約値を1回のSQLで取得します。
 // API層でRunごとにCase結果を問い合わせるN+1を避けるための読み取り専用クエリです。
 func (s *SQLiteStore) ListRunSummaries(ctx context.Context, limit int) ([]domain.RunWithStats, error) {
+	return s.ListRunSummariesWithTuning(ctx, limit, false)
+}
+func (s *SQLiteStore) ListRunSummariesWithTuning(ctx context.Context, limit int, includeTuning bool) ([]domain.RunWithStats, error) {
 	if limit <= 0 {
 		limit = -1
 	}
@@ -179,10 +190,10 @@ func (s *SQLiteStore) ListRunSummaries(ctx context.Context, limit int) ([]domain
        r.threads, r.timeout_ms, r.status, r.comment, r.created_at, r.started_at, r.finished_at,
        c.input_case_id, c.score, c.execution_time_ns
 FROM (
-  SELECT * FROM runs ORDER BY run_number DESC, id LIMIT ?
+  SELECT * FROM runs WHERE (? OR tuning_study = '') ORDER BY run_number DESC, id LIMIT ?
 	) r
 	LEFT JOIN cases c ON c.run_id = r.id
-	ORDER BY r.run_number DESC, r.id, c.input_case_id`, limit)
+	ORDER BY r.run_number DESC, r.id, c.input_case_id`, includeTuning, limit)
 	if err != nil {
 		return nil, fmt.Errorf("could not get aggregated Run list: %w", err)
 	}

@@ -1,4 +1,4 @@
-export type Tab = 'overview' | 'input' | 'detail' | 'compare' | 'settings'
+export type Tab = 'overview' | 'tuning' | 'input' | 'detail' | 'compare' | 'settings'
 
 export type InputGenerator = {
   name: string
@@ -83,6 +83,9 @@ export type ConfigData = {
   statistics: {
     confidence_level: number
     bootstrap_iterations: number
+  }
+  tuning: {
+    source_target: string
   }
   input_format: {
     variables: InputVariable[]

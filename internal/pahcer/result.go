@@ -11,6 +11,7 @@ import (
 )
 
 type ResultCase struct {
+	MissingScore  bool    `json:"-"`
 	Seed          uint64  `json:"seed"`
 	Score         float64 `json:"score"`
 	ExecutionTime float64 `json:"execution_time"`
@@ -49,4 +50,22 @@ func LoadLatestResult(workspaceDir string) (ResultFile, error) {
 
 func ExecutionDuration(seconds float64) time.Duration {
 	return time.Duration(seconds * float64(time.Second))
+}
+
+func (r *ResultCase) UnmarshalJSON(data []byte) error {
+	type plain ResultCase
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields["seed"]) == 0 || string(fields["seed"]) == "null" {
+		return fmt.Errorf("case result seed is missing")
+	}
+	value.MissingScore = len(fields["score"]) == 0 || string(fields["score"]) == "null"
+	*r = ResultCase(value)
+	return nil
 }

@@ -19,6 +19,11 @@ type FileConfig struct {
 	Score       ScoreConfig       `toml:"score" json:"score"`
 	Statistics  StatisticsConfig  `toml:"statistics" json:"statistics"`
 	InputFormat InputFormatConfig `toml:"input_format" json:"input_format"`
+	Tuning      TuningConfig      `toml:"tuning" json:"tuning"`
+}
+
+type TuningConfig struct {
+	SourceTarget string `toml:"source_target" json:"source_target"`
 }
 
 type ProjectConfig struct {
@@ -222,6 +227,11 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	if c.File.Tuning.SourceTarget != "" {
+		if _, err := c.ResolveProjectPath("tuning.source_target", c.File.Tuning.SourceTarget); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -232,6 +242,8 @@ func (c Config) InputDir(relativeOverride string) (string, error) {
 	}
 	return c.ResolveProjectPath("input_dir", relative)
 }
+
+const TuningInputRoot = "ahc-plaza/inputs"
 
 // InputSetDir は入力セットとして扱える、入力ルート直下のディレクトリを返します。
 func (c Config) InputSetDir(relativeOverride string) (string, error) {
@@ -270,6 +282,10 @@ func IsWithin(root, target string) (bool, error) {
 }
 
 func applyDefaults(file *FileConfig) {
+	file.Tuning.SourceTarget = filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(file.Tuning.SourceTarget))))
+	if file.Tuning.SourceTarget == "." {
+		file.Tuning.SourceTarget = ""
+	}
 	setDefault(&file.Paths.SolverDir, "solver")
 	setDefault(&file.Paths.ToolsDir, "tools")
 	setDefault(&file.Execution.DefaultInputDir, "ahc-plaza/inputs")

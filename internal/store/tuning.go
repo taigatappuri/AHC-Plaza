@@ -1,0 +1,219 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"sort"
+
+	"github.com/taigatappuri/AHC-Plaza/internal/domain"
+)
+
+func (s *SQLiteStore) DeleteTuningStudy(ctx context.Context, id string) ([]string, error) {
+	runIDs := []string{}
+	err := s.transaction(ctx, func(tx *sql.Tx) error {
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM tuning_studies WHERE id=?`, id).Scan(&exists); err != nil {
+			return err
+		}
+		if exists != 1 {
+			return sql.ErrNoRows
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT id FROM runs WHERE tuning_study=? ORDER BY id`, id)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var runID string
+			if err := rows.Scan(&runID); err != nil {
+				rows.Close()
+				return err
+			}
+			runIDs = append(runIDs, runID)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, query := range []string{
+			`DELETE FROM cases WHERE run_id IN (SELECT id FROM runs WHERE tuning_study=?)`,
+			`DELETE FROM input_cases WHERE run_id IN (SELECT id FROM runs WHERE tuning_study=?)`,
+			`DELETE FROM runs WHERE tuning_study=?`,
+			`DELETE FROM tuning_outbox WHERE study_id=?`,
+			`DELETE FROM tuning_trials WHERE study_id=?`,
+			`DELETE FROM tuning_studies WHERE id=?`,
+		} {
+			if _, err := tx.ExecContext(ctx, query, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	sort.Strings(runIDs)
+	return runIDs, err
+}
+
+func (s *SQLiteStore) TuningRunIDs(ctx context.Context, id string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM runs WHERE tuning_study=? ORDER BY id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *SQLiteStore) migrateTuning(ctx context.Context) error {
+	for _, q := range []string{
+		`CREATE TABLE IF NOT EXISTS tuning_studies(id TEXT PRIMARY KEY,status TEXT NOT NULL,data TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS tuning_trials(study_id TEXT NOT NULL,number INTEGER NOT NULL,run_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(study_id,number))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS tuning_run_unique ON tuning_trials(run_id) WHERE run_id != ''`,
+		`CREATE TABLE IF NOT EXISTS tuning_outbox(study_id TEXT NOT NULL,number INTEGER NOT NULL,data TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(study_id,number))`,
+		`CREATE TABLE IF NOT EXISTS tuning_profiles(source_hash TEXT PRIMARY KEY,data TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS tuning_profile_sources(solver TEXT PRIMARY KEY,source_hash TEXT NOT NULL,data TEXT NOT NULL)`,
+	} {
+		if _, e := s.db.ExecContext(ctx, q); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+func (s *SQLiteStore) SaveStudy(ctx context.Context, v domain.TuningStudy) error {
+	b, e := json.Marshal(v)
+	if e != nil {
+		return e
+	}
+	_, e = s.db.ExecContext(ctx, `INSERT INTO tuning_studies VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,data=excluded.data`, v.ID, v.Status, b)
+	return e
+}
+func (s *SQLiteStore) GetStudy(ctx context.Context, id string) (domain.TuningStudy, error) {
+	var v domain.TuningStudy
+	var b []byte
+	e := s.db.QueryRowContext(ctx, `SELECT data FROM tuning_studies WHERE id=?`, id).Scan(&b)
+	if e == nil {
+		e = json.Unmarshal(b, &v)
+	}
+	return v, e
+}
+func (s *SQLiteStore) ListStudies(ctx context.Context) ([]domain.TuningStudy, error) {
+	rows, e := s.db.QueryContext(ctx, `SELECT data FROM tuning_studies ORDER BY id DESC`)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []domain.TuningStudy{}
+	for rows.Next() {
+		var b []byte
+		var v domain.TuningStudy
+		if e = rows.Scan(&b); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal(b, &v); e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (s *SQLiteStore) SaveTrial(ctx context.Context, v domain.TuningTrial) error {
+	b, e := json.Marshal(v)
+	if e != nil {
+		return e
+	}
+	return s.transaction(ctx, func(tx *sql.Tx) error {
+		var previous []byte
+		err := tx.QueryRowContext(ctx, `SELECT data FROM tuning_trials WHERE study_id=? AND number=?`, v.StudyID, v.Number).Scan(&previous)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			var saved domain.TuningTrial
+			if err := json.Unmarshal(previous, &saved); err != nil {
+				return err
+			}
+			if saved.Status != "RUNNING" {
+				saved.Delivered = v.Delivered
+				canonical, err := json.Marshal(saved)
+				if err != nil {
+					return err
+				}
+				if string(canonical) != string(b) {
+					return fmt.Errorf("確定済みTrialの結果は変更できません")
+				}
+			}
+		}
+		if _, e := tx.ExecContext(ctx, `INSERT INTO tuning_trials VALUES(?,?,?,?) ON CONFLICT(study_id,number) DO UPDATE SET run_id=excluded.run_id,data=excluded.data`, v.StudyID, v.Number, v.RunID, b); e != nil {
+			return e
+		}
+		if v.Status != "RUNNING" {
+			_, e := tx.ExecContext(ctx, `INSERT INTO tuning_outbox VALUES(?,?,?,?) ON CONFLICT(study_id,number) DO UPDATE SET data=excluded.data,delivered=excluded.delivered`, v.StudyID, v.Number, b, v.Delivered)
+			return e
+		}
+		return nil
+	})
+}
+func (s *SQLiteStore) Trials(ctx context.Context, id string, offset, limit int) ([]domain.TuningTrial, error) {
+	if offset < 0 || limit < 1 || limit > 10000 {
+		return nil, fmt.Errorf("ページ範囲が不正です")
+	}
+	rows, e := s.db.QueryContext(ctx, `SELECT data FROM tuning_trials WHERE study_id=? ORDER BY number LIMIT ? OFFSET ?`, id, limit, offset)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []domain.TuningTrial{}
+	for rows.Next() {
+		var b []byte
+		var v domain.TuningTrial
+		if e = rows.Scan(&b); e != nil {
+			return nil, e
+		}
+		if e = json.Unmarshal(b, &v); e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (s *SQLiteStore) SaveProfile(ctx context.Context, hash string, data []byte) error {
+	_, e := s.db.ExecContext(ctx, `INSERT INTO tuning_profiles VALUES(?,?) ON CONFLICT(source_hash) DO UPDATE SET data=excluded.data`, hash, data)
+	return e
+}
+func (s *SQLiteStore) Profile(ctx context.Context, hash string) (json.RawMessage, error) {
+	var b []byte
+	e := s.db.QueryRowContext(ctx, `SELECT data FROM tuning_profiles WHERE source_hash=?`, hash).Scan(&b)
+	if e == sql.ErrNoRows {
+		return nil, nil
+	}
+	return b, e
+}
+
+type SourceProfile struct {
+	Hash       string          `json:"hash"`
+	Parameters json.RawMessage `json:"parameters"`
+}
+
+func (s *SQLiteStore) SaveSourceProfile(ctx context.Context, solver, hash string, data []byte) error {
+	return s.transaction(ctx, func(tx *sql.Tx) error {
+		if _, e := tx.ExecContext(ctx, `INSERT INTO tuning_profiles VALUES(?,?) ON CONFLICT(source_hash) DO UPDATE SET data=excluded.data`, hash, data); e != nil {
+			return e
+		}
+		_, e := tx.ExecContext(ctx, `INSERT INTO tuning_profile_sources VALUES(?,?,?) ON CONFLICT(solver) DO UPDATE SET source_hash=excluded.source_hash,data=excluded.data`, solver, hash, data)
+		return e
+	})
+}
+func (s *SQLiteStore) PreviousProfile(ctx context.Context, solver, hash string) (*SourceProfile, error) {
+	var p SourceProfile
+	e := s.db.QueryRowContext(ctx, `SELECT source_hash,data FROM tuning_profile_sources WHERE solver=? AND source_hash!=?`, solver, hash).Scan(&p.Hash, &p.Parameters)
+	if e == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &p, e
+}

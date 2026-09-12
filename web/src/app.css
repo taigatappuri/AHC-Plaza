@@ -165,3 +165,6 @@ select { cursor: pointer; }
   .visualizer-toolbar { grid-template-columns: 1fr 90px; }
   .visualizer-scale { grid-column: 1 / -1; }
 }
+
+.history-tuning-toggle { display: flex; align-items: center; gap: 8px; width: fit-content; margin-bottom: 16px; font-size: 13px; }
+.history-tuning-toggle input { flex: 0 0 16px; width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; accent-color: var(--selection); }

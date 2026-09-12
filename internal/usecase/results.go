@@ -26,16 +26,27 @@ func buildCaseResults(root, runID string, workspace pahcer.Workspace, inputCases
 	}
 	waSeeds := make(map[uint64]bool, len(resultFile.WrongAnswerSeeds))
 	for _, seed := range resultFile.WrongAnswerSeeds {
+		if seed >= uint64(len(inputCases)) {
+			return nil, fmt.Errorf("wrong-answer seed is out of range: %d", seed)
+		}
 		waSeeds[seed] = true
 	}
 	results := make([]domain.CaseResult, 0, len(resultFile.Cases))
+	seen := map[uint64]bool{}
 	for _, item := range resultFile.Cases {
+		if seen[item.Seed] {
+			return nil, fmt.Errorf("duplicate pahcer result seed: %d", item.Seed)
+		}
+		seen[item.Seed] = true
 		if item.Seed >= uint64(len(inputCases)) {
 			return nil, fmt.Errorf("pahcer result seed exceeds the number of input cases: %d", item.Seed)
 		}
 		inputCase := inputCases[item.Seed]
 		caseNumber := fmt.Sprintf("%04d", item.Seed)
 		errorMessage := item.ErrorMessage
+		if item.MissingScore {
+			errorMessage = "score is missing from the case result"
+		}
 		status := "succeeded"
 		if item.TimedOut() {
 			status = "tle"

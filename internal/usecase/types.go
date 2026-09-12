@@ -8,15 +8,17 @@ import (
 
 // RunRequest はCLI/APIから受け取ったRun実行条件です。
 type RunRequest struct {
-	RunID               string `json:"-"`
-	ConfigPath          string `json:"-"`
-	Solver              string `json:"solver"`
-	InputDir            string `json:"input_dir"`
-	Threads             int    `json:"threads"`
-	TimeoutMilliseconds int    `json:"timeout_ms"`
-	Comment             string `json:"comment"`
-	PahcerBinary        string `json:"pahcer"`
-	SettingFile         string `json:"setting_file"`
+	Prepared            *PreparedRun `json:"-"`
+	TuningStudy         string       `json:"-"`
+	RunID               string       `json:"-"`
+	ConfigPath          string       `json:"-"`
+	Solver              string       `json:"solver"`
+	InputDir            string       `json:"input_dir"`
+	Threads             int          `json:"threads"`
+	TimeoutMilliseconds int          `json:"timeout_ms"`
+	Comment             string       `json:"comment"`
+	PahcerBinary        string       `json:"pahcer"`
+	SettingFile         string       `json:"setting_file"`
 }
 
 // RunSummary はRun完了後にCLI/APIへ返す要約です。
