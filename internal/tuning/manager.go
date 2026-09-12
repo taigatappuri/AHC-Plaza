@@ -134,11 +134,6 @@ func (m *Manager) save(s *domain.TuningStudy) error {
 	defer cancel()
 	s.UpdatedAt = time.Now().UTC()
 	err := m.Store.SaveStudy(ctx, *s)
-	if err == nil {
-		m.mu.Lock()
-		delete(m.usageCache, s.ID)
-		m.mu.Unlock()
-	}
 	return err
 }
 func (m *Manager) dir(id string) (string, error) {

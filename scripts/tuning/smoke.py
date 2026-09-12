@@ -68,6 +68,8 @@ def assert_tuning_targets_removed(root, study_id):
         run_ids.extend(row[0] for row in db.execute('SELECT run_id FROM tuning_trials WHERE study_id=?', (study_id,)))
     remaining = [run_id for run_id in run_ids if (root / 'ahc-plaza/runs' / run_id / 'workspace/tools/target').exists()]
     assert not remaining, f'tuning target caches remain: {remaining}'
+    copied_sources = [run_id for run_id in run_ids if (root / 'ahc-plaza/runs' / run_id / 'workspace/main.cpp').exists()]
+    assert not copied_sources, f'tuning project copies remain: {copied_sources}'
 
 def main():
     parser = argparse.ArgumentParser()
@@ -95,7 +97,8 @@ def main():
             return result
         run('doctor')
         assert not (root / 'ahc-plaza/runtime').exists()
-        run('run', '--solver', 'solver/main.cpp', '--input-dir', 'ahc-plaza/inputs/train', '--threads', '1', '--json')
+        ordinary = json.loads(run('run', '--solver', 'solver/main.cpp', '--input-dir', 'ahc-plaza/inputs/train', '--threads', '1', '--json').stdout)
+        assert (root / 'ahc-plaza/runs' / ordinary['run_id'] / 'workspace/main.cpp').exists()
         assert not (root / 'ahc-plaza/runtime').exists()
         original = (root / 'solver/main.cpp').read_bytes()
         print(f'Running {args.trials} real candidates...', flush=True)
