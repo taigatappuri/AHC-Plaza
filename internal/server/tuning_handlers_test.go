@@ -56,3 +56,16 @@ func TestTuningInputsIgnoreOrdinaryRunInputRoot(t *testing.T) {
 		}
 	}
 }
+
+func TestTuningValidationRouteIsNotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	defer s.Close()
+
+	r := httptest.NewRequest("POST", "/api/tuning/studies/removed-validation/validate", bytes.NewBufferString(`{"input_dir":"ahc-plaza/inputs/cases","threads":1}`))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 404 {
+		t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+}

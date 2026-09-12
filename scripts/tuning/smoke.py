@@ -68,9 +68,11 @@ def main():
     args = parser.parse_args()
     binary = str(Path(args.binary).resolve())
     with tempfile.TemporaryDirectory(prefix='plaza-smoke-') as temporary:
-        root = Path(temporary)
+        temporary_root = Path(temporary)
+        root = temporary_root / 'project'
+        root.mkdir()
         fixture(root)
-        path = root / 'path'
+        path = temporary_root / 'path'
         path.mkdir()
         for command in ['sh', 'g++', 'as', 'ld', 'pahcer']:
             resolved = shutil.which(command)
