@@ -748,7 +748,9 @@ func (m *Manager) cleanupTuningRunCache(studyID, runID string) error {
 		return fmt.Errorf("Run IDが不正です")
 	}
 	runDir := filepath.Join(m.Root, "ahc-plaza", "runs", runID)
-	before := directorySize(runDir)
+	m.mu.Lock()
+	cachedBytes := m.runUsageCache[runID]
+	m.mu.Unlock()
 	workspace := filepath.Join(runDir, "workspace")
 	tools := filepath.Join(workspace, "tools")
 	for _, path := range []string{filepath.Join(m.Root, "ahc-plaza"), filepath.Join(m.Root, "ahc-plaza", "runs"), runDir, workspace, tools} {
@@ -777,7 +779,7 @@ func (m *Manager) cleanupTuningRunCache(studyID, runID string) error {
 	m.runUsageCache[runID] = bytes
 	if sample, ok := m.usageCache[studyID]; ok {
 		if sample.runs[runID] {
-			sample.bytes += bytes - before
+			sample.bytes += bytes - cachedBytes
 		} else {
 			sample.bytes += bytes
 			if sample.runs == nil {

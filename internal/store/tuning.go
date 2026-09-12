@@ -5,8 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/taigatappuri/AHC-Plaza/internal/domain"
 	"sort"
+
+	"github.com/taigatappuri/AHC-Plaza/internal/domain"
 )
 
 func (s *SQLiteStore) DeleteTuningStudy(ctx context.Context, id string) ([]string, error) {

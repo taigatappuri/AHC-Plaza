@@ -159,7 +159,7 @@ func TestCleanupTuningRunCacheRemovesBuildCopiesAndUpdatesUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := directorySize(filepath.Join(root, "ahc-plaza", "runs", "run-1"))
-	m := &Manager{Root: root, usageCache: map[string]usageSample{"study-1": {at: time.Now(), bytes: before + 100, runs: map[string]bool{"run-1": true}}}}
+	m := &Manager{Root: root, runUsageCache: map[string]int64{"run-1": before}, usageCache: map[string]usageSample{"study-1": {at: time.Now(), bytes: before + 100, runs: map[string]bool{"run-1": true}}}}
 	if err := m.cleanupTuningRunCache("study-1", "run-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -183,13 +183,13 @@ func TestCleanupTuningRunCacheRemovesBuildCopiesAndUpdatesUsage(t *testing.T) {
 
 func TestCleanupTuningRunCacheAccountsForWhetherRunWasAlreadyMeasured(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		withSample bool
-		includes   bool
+		name        string
+		includes    bool
+		cachedBytes int64
 	}{
-		{"cached before Run started", true, false},
-		{"measured while Run was running", true, true},
-		{"no Study cache", false, false},
+		{"Run ID cached before directory exists", true, 0},
+		{"measured while Run was running", true, 1024},
+		{"Run not measured", false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -203,27 +203,21 @@ func TestCleanupTuningRunCacheAccountsForWhetherRunWasAlreadyMeasured(t *testing
 			if err := os.WriteFile(filepath.Join(target, "large"), make([]byte, 4096), 0644); err != nil {
 				t.Fatal(err)
 			}
-			before := directorySize(runDir)
-			m := &Manager{Root: root}
-			if tc.withSample {
-				runs := map[string]bool{}
-				bytes := int64(100)
-				if tc.includes {
-					runs["run-1"] = true
-					bytes += before
-				}
-				m.usageCache = map[string]usageSample{"study": {at: time.Now(), bytes: bytes, runs: runs}}
+			runs := map[string]bool{}
+			runUsage := map[string]int64{}
+			if tc.includes {
+				runs["run-1"] = true
+				runUsage["run-1"] = tc.cachedBytes
 			}
+			m := &Manager{Root: root, runUsageCache: runUsage, usageCache: map[string]usageSample{
+				"study": {at: time.Now(), bytes: 100 + tc.cachedBytes, runs: runs},
+			}}
 			if err := m.cleanupTuningRunCache("study", "run-1"); err != nil {
 				t.Fatal(err)
 			}
 			after := directorySize(runDir)
-			if tc.withSample {
-				if got := m.usageCache["study"].bytes; got != 100+after {
-					t.Fatalf("usage = %d, want %d", got, 100+after)
-				}
-			} else if _, ok := m.usageCache["study"]; ok {
-				t.Fatal("cleanup unexpectedly created a Study usage sample")
+			if got := m.usageCache["study"].bytes; got != 100+after {
+				t.Fatalf("usage = %d, want %d", got, 100+after)
 			}
 		})
 	}
