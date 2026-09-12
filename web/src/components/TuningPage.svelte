@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { errorMessage, requestJSON } from '../lib/api'
+  import { mergeTrialHistory, trialHistoryOffset } from '../lib/tuning-history.js'
   import type { TuneParameter, TuneScan, TuneStudy, TuneTrial, TuneEnvironment, TuneDetail } from '../lib/tuning'
   export let solvers: string[] = []
   let inputDirectories: string[] = [], inputsLoading = false
@@ -12,7 +13,7 @@
   let scan: TuneScan | null = null, parameters: TuneParameter[] = [], environment: TuneEnvironment | null = null
   let studies: TuneStudy[] = [], detail: TuneDetail | null = null, rows: TuneTrial[] = [], history: TuneTrial[] = []
   let message = '', busy = false, page = 0, additional = 0
-  let events: EventSource | null = null, refreshing = false, lastRevision = '', destroyed = false
+  let events: EventSource | null = null, refreshing = false, destroyed = false
   let selectedTrial: number | null = null
   let selectedStudyID = ""
   let previousParameters: TuneParameter[] = [], caseCount: number | null = null, countInput = ""
@@ -64,12 +65,17 @@
       if(environment?.available && !environment.ready) environment=await requestJSON<TuneEnvironment>("/api/tuning/environment")
       rows = await requestJSON<TuneTrial[]>(`/api/tuning/studies/${id}/trials?offset=${page * 50}&limit=50`)
       const count = detail.study.completed + detail.study.failed
-      const revision = `${id}:${count}`
-      if (revision !== lastRevision) { const all: TuneTrial[] = []; for (let offset = 0; offset < count; offset += 100) all.push(...await requestJSON<TuneTrial[]>(`/api/tuning/studies/${id}/trials?offset=${offset}&limit=100`)); history = all; lastRevision = revision }
+      if (history.length > count) history = []
+      for (let offset = trialHistoryOffset(history.length, count); offset < count;) {
+        const incomingTrials = await requestJSON<TuneTrial[]>(`/api/tuning/studies/${id}/trials?offset=${offset}&limit=100`)
+        if (id !== selectedStudyID || destroyed || incomingTrials.length === 0) break
+        history = mergeTrialHistory(history, incomingTrials, offset)
+        offset += incomingTrials.length
+      }
     } finally { refreshing = false }
   }
   async function selectStudy(id: string) {
-    events?.close(); selectedStudyID = id; page = 0; selectedTrial = null; lastRevision = ''; while (refreshing) await new Promise(resolve => setTimeout(resolve, 30)); await refresh(id)
+    events?.close(); selectedStudyID = id; page = 0; selectedTrial = null; history = []; while (refreshing) await new Promise(resolve => setTimeout(resolve, 30)); await refresh(id)
     if (destroyed) return; events = new EventSource(`/api/tuning/studies/${id}/events`)
     events.onopen = () => { void refresh(id).catch(e => message = errorMessage(e)) }
     events.addEventListener('status', () => { void refresh(id).catch(e => message = errorMessage(e)) })
@@ -77,6 +83,7 @@
   async function stop(immediate: boolean) { if (!detail) return; await action(async () => { await post(`studies/${detail!.study.id}/${immediate ? 'cancel' : 'pause'}`); message = immediate ? '評価を中断しています。' : '現在の候補の評価後に停止します。' }) }
   async function resume() { if (!detail) return; await action(async () => { await post(`studies/${detail!.study.id}/resume`, { additional_trials: additional }); additional = 0; await refresh(detail!.study.id) }) }
   async function exportSource() { if (!detail) return; await action(async () => { const result = await post<{ path: string; source: string }>(`studies/${detail!.study.id}/export`, { number: selectedTrial }); const url = URL.createObjectURL(new Blob([result.source], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = result.path.split('/').pop() ?? 'main.best.cpp'; a.click(); URL.revokeObjectURL(url); message = `保存しました: ${result.path}` }) }
+  async function deleteStudy() { if (!detail || active) return; const id = detail.study.id; if (!confirm(`Study ${id} を削除します。関連Runを含む約 ${mb(detail.usage_bytes)} を解放します。この操作は取り消せません。`)) return; await action(async () => { await requestJSON(`/api/tuning/studies/${id}`, { method: 'DELETE' }); events?.close(); detail = null; rows = []; history = []; selectedStudyID = ''; await loadStudies(); message = `Study ${id} を削除しました。` }) }
   onMount(() => { void Promise.all([loadStudies(), loadInputDirectories(), requestJSON<TuneEnvironment>('/api/tuning/environment').then(v => environment = v)]).catch(e => message = errorMessage(e)); return () => { destroyed = true; events?.close() } })
 </script>
 
@@ -139,6 +146,7 @@
       <div class="actions"><button disabled={page === 0 || refreshing} onclick={() => { page--; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>前へ</button><span>{page + 1}ページ</span><button disabled={rows.length < 50 || refreshing} onclick={() => { page++; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>次へ</button></div>
       <p>選択中：{selectedTrial === null ? 'デフォルト値を含めた最良候補' : `Trial ${selectedTrial}`}</p>
       <div class="actions"><button onclick={() => selectedTrial = null}>最良候補に戻す</button><button disabled={busy || detail.study.best_value === null} onclick={exportSource}>値を入れたC++を保存</button><button disabled={!detail.study.best_run} onclick={() => onCompare(detail!.study.baseline_run, detail!.study.best_run)}>デフォルト値と最良候補を比較</button></div>
+      <div class="actions"><button disabled={busy || active} onclick={deleteStudy}>このStudyを削除</button></div>
     </section>
   {/if}
 </div>
