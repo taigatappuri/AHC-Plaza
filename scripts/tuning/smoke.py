@@ -61,6 +61,14 @@ stderr = "./tools/err/{SEED04}.txt"
 measure_time = true
 ''')
 
+def assert_tuning_targets_removed(root, study_id):
+    with sqlite3.connect(root / 'ahc-plaza/ahc-plaza.db') as db:
+        study = json.loads(db.execute('SELECT data FROM tuning_studies WHERE id=?', (study_id,)).fetchone()[0])
+        run_ids = [study['baseline_run']]
+        run_ids.extend(row[0] for row in db.execute('SELECT run_id FROM tuning_trials WHERE study_id=?', (study_id,)))
+    remaining = [run_id for run_id in run_ids if (root / 'ahc-plaza/runs' / run_id / 'workspace/tools/target').exists()]
+    assert not remaining, f'tuning target caches remain: {remaining}'
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', required=True)
@@ -94,6 +102,7 @@ def main():
         result = json.loads(run('tune', '--solver', 'solver/main.cpp', '--input-dir', 'ahc-plaza/inputs/train', '--trials', str(args.trials), '--threads', '1').stdout)
         assert result['status'] == 'completed' and result['completed'] == args.trials, result
         identifier = result['id']
+        assert_tuning_targets_removed(root, identifier)
         run('doctor', '--tuning')
         exported = json.loads(run('tune', 'export', '--study', identifier, '--best').stdout)
         run('run', '--solver', exported['path'], '--input-dir', 'ahc-plaza/inputs/train', '--threads', '1', '--json')
@@ -103,6 +112,7 @@ def main():
         (root / 'ahc-plaza/inputs/train/0.txt').write_text('9999')
         resumed = json.loads(run('tune', 'resume', '--study', identifier, '--additional-trials', '2').stdout)
         assert resumed['completed'] == args.trials + 2, resumed
+        assert_tuning_targets_removed(root, identifier)
         # Graceful interruption and an ungraceful kill both preserve a resumable Study.
         for mode in ['terminate', 'kill']:
             process = subprocess.Popen([binary, 'tune', 'resume', '--study', identifier, '--additional-trials', '5'], cwd=root, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -122,6 +132,7 @@ def main():
             resumed = json.loads(run('tune', 'resume', '--study', identifier).stdout)
             assert resumed['status'] == 'completed', resumed
             assert resumed['completed'] + resumed['failed'] == resumed['trials'], resumed
+            assert_tuning_targets_removed(root, identifier)
         with sqlite3.connect(root / 'ahc-plaza/ahc-plaza.db') as db:
             trials = [json.loads(row[0]) for row in db.execute('SELECT data FROM tuning_trials WHERE study_id=?', (identifier,))]
             assert len({t['run_id'] for t in trials}) == len(trials)
@@ -144,7 +155,7 @@ def main():
         run('tune', 'clean-runtime')
         assert not (root / 'ahc-plaza/runtime').exists()
         assert (root / 'ahc-plaza/tuning' / identifier / 'manifest.json').exists()
-        print(json.dumps({'result':'PASS', 'candidate_count':len(trials), 'successful':resumed['completed'], 'failed_or_interrupted':resumed['failed'], 'checks':['ordinary Run without runtime','offline bundled Python','real Optuna/C++/pahcer','export and rerun','frozen source/input','pause/resume','SIGKILL recovery','outbox reconciliation','tamper rejection','runtime cleanup']}, ensure_ascii=False))
+        print(json.dumps({'result':'PASS', 'candidate_count':len(trials), 'successful':resumed['completed'], 'failed_or_interrupted':resumed['failed'], 'checks':['ordinary Run without runtime','offline bundled Python','real Optuna/C++/pahcer','export and rerun','frozen source/input','pause/resume','SIGKILL recovery','tuning target cleanup','outbox reconciliation','tamper rejection','runtime cleanup']}, ensure_ascii=False))
 
 if __name__ == '__main__':
     main()
