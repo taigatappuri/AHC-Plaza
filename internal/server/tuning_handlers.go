@@ -175,6 +175,13 @@ func (s *Server) handleTuning(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if action == "" && r.Method == "DELETE" {
+		result, e := s.Tuning.Delete(r.Context(), id)
+		if !writeErrorIf(w, http.StatusConflict, e) {
+			writeJSON(w, http.StatusOK, result)
+		}
+		return
+	}
 	if action == "trials" && r.Method == "GET" {
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 		limit := 50

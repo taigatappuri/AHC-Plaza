@@ -72,10 +72,15 @@ type Manager struct {
 	closed                    bool
 	wg                        sync.WaitGroup
 	usageCache                map[string]usageSample
+	runUsageCache             map[string]int64
+	usageMu                   sync.Mutex
 }
 
 func NewManager(root, configPath, version string, database *store.SQLiteStore) (*Manager, error) {
 	m := &Manager{Root: root, ConfigPath: configPath, Version: version, Store: database, active: map[string]*activity{}}
+	if e := cleanupDeletionTrash(root); e != nil {
+		fmt.Fprintln(os.Stderr, "tuning deletion cleanup:", e)
+	}
 	studies, e := database.ListStudies(context.Background())
 	if e != nil {
 		return nil, e
@@ -90,6 +95,39 @@ func NewManager(root, configPath, version string, database *store.SQLiteStore) (
 		}
 	}
 	return m, nil
+}
+
+func cleanupDeletionTrash(root string) error {
+	dataRoot := filepath.Join(root, "ahc-plaza")
+	if info, e := os.Lstat(dataRoot); e == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
+		return fmt.Errorf("削除待ち領域の親が通常のディレクトリではありません: %s", dataRoot)
+	} else if e != nil && !os.IsNotExist(e) {
+		return e
+	}
+	for _, parent := range []string{filepath.Join(root, "ahc-plaza", "tuning"), filepath.Join(root, "ahc-plaza", "runs")} {
+		info, e := os.Lstat(parent)
+		if os.IsNotExist(e) {
+			continue
+		}
+		if e != nil {
+			return e
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("削除待ち領域の親が通常のディレクトリではありません: %s", parent)
+		}
+		entries, e := os.ReadDir(parent)
+		if e != nil {
+			return e
+		}
+		for _, entry := range entries {
+			if strings.Contains(entry.Name(), ".deleting-") {
+				if e := os.RemoveAll(filepath.Join(parent, entry.Name())); e != nil {
+					return e
+				}
+			}
+		}
+	}
+	return nil
 }
 func (m *Manager) save(s *domain.TuningStudy) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -682,16 +720,16 @@ func (m *Manager) evaluate(ctx context.Context, s domain.TuningStudy, v Manifest
 }
 
 func (m *Manager) cleanupTuningRunCache(studyID, runID string) error {
-	m.mu.Lock()
-	delete(m.usageCache, studyID)
-	m.mu.Unlock()
+	m.usageMu.Lock()
+	defer m.usageMu.Unlock()
 	if runID == "" || !filepath.IsLocal(runID) || strings.ContainsAny(runID, "/\\") || strings.HasPrefix(runID, ".") {
 		return fmt.Errorf("Run IDが不正です")
 	}
 	runDir := filepath.Join(m.Root, "ahc-plaza", "runs", runID)
+	before := directorySize(runDir)
 	workspace := filepath.Join(runDir, "workspace")
 	tools := filepath.Join(workspace, "tools")
-	for _, path := range []string{runDir, workspace, tools} {
+	for _, path := range []string{filepath.Join(m.Root, "ahc-plaza"), filepath.Join(m.Root, "ahc-plaza", "runs"), runDir, workspace, tools} {
 		info, e := os.Lstat(path)
 		if os.IsNotExist(e) {
 			return nil
@@ -703,18 +741,60 @@ func (m *Manager) cleanupTuningRunCache(studyID, runID string) error {
 			return fmt.Errorf("チューニングRunのキャッシュ用パスが通常のディレクトリではありません: %s", path)
 		}
 	}
-	target := filepath.Join(tools, "target")
-	info, e := os.Lstat(target)
-	if os.IsNotExist(e) {
-		return nil
+	if e := removeChildrenExcept(workspace, map[string]bool{"tools": true, "pahcer": true}); e != nil {
+		return e
 	}
+	if e := removeChildrenExcept(tools, map[string]bool{"in": true, "out": true, "err": true}); e != nil {
+		return e
+	}
+	bytes := directorySize(runDir)
+	m.mu.Lock()
+	if m.runUsageCache == nil {
+		m.runUsageCache = map[string]int64{}
+	}
+	m.runUsageCache[runID] = bytes
+	if sample, ok := m.usageCache[studyID]; ok {
+		sample.bytes += bytes - before
+		m.usageCache[studyID] = sample
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+func removeChildrenExcept(dir string, keep map[string]bool) error {
+	entries, e := os.ReadDir(dir)
 	if e != nil {
 		return e
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("チューニングRunのtargetキャッシュが通常のディレクトリではありません")
+	for _, entry := range entries {
+		if keep[entry.Name()] {
+			info, e := entry.Info()
+			if e != nil {
+				return e
+			}
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return fmt.Errorf("保持対象が通常のディレクトリではありません: %s", filepath.Join(dir, entry.Name()))
+			}
+			continue
+		}
+		if e := os.RemoveAll(filepath.Join(dir, entry.Name())); e != nil {
+			return e
+		}
 	}
-	return os.RemoveAll(target)
+	return nil
+}
+
+func directorySize(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, e error) error {
+		if e == nil && !d.IsDir() {
+			if info, e := d.Info(); e == nil {
+				total += info.Size()
+			}
+		}
+		return nil
+	})
+	return total
 }
 
 func (m *Manager) cleanupSavedTuningRunCaches(studyID, baselineRun string, trials []domain.TuningTrial) {

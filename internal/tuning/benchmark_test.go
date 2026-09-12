@@ -124,3 +124,13 @@ func BenchmarkTuningPhases(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkUsageCached10000Trials(b *testing.B) {
+	m := &Manager{usageCache: map[string]usageSample{"study": {at: time.Now(), bytes: 123456}}}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if got := m.Usage("study"); got != 123456 {
+			b.Fatal(got)
+		}
+	}
+}

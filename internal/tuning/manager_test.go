@@ -129,15 +129,22 @@ func TestBuildCompatibilityReportsSourceTargetChange(t *testing.T) {
 	}
 }
 
-func TestCleanupTuningRunCacheRemovesOnlyTargetAndInvalidatesUsage(t *testing.T) {
+func TestCleanupTuningRunCacheRemovesBuildCopiesAndUpdatesUsage(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "ahc-plaza", "runs", "run-1", "workspace", "tools", "target")
 	out := filepath.Join(root, "ahc-plaza", "runs", "run-1", "workspace", "tools", "out")
+	project := filepath.Join(root, "ahc-plaza", "runs", "run-1", "workspace", "copied-project")
+	pahcerResult := filepath.Join(root, "ahc-plaza", "runs", "run-1", "workspace", "pahcer", "json", "result.json")
 	if err := os.MkdirAll(target, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(out, 0755); err != nil {
 		t.Fatal(err)
+	}
+	for _, path := range []string{project, filepath.Dir(pahcerResult)} {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(target, "cache"), []byte("large"), 0644); err != nil {
 		t.Fatal(err)
@@ -145,7 +152,14 @@ func TestCleanupTuningRunCacheRemovesOnlyTargetAndInvalidatesUsage(t *testing.T)
 	if err := os.WriteFile(filepath.Join(out, "0.txt"), []byte("result"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	m := &Manager{Root: root, usageCache: map[string]usageSample{"study-1": {bytes: 123}}}
+	if err := os.WriteFile(filepath.Join(project, "artifact"), make([]byte, 1<<20), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pahcerResult, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	before := directorySize(filepath.Join(root, "ahc-plaza", "runs", "run-1"))
+	m := &Manager{Root: root, usageCache: map[string]usageSample{"study-1": {at: time.Now(), bytes: before + 100}}}
 	if err := m.cleanupTuningRunCache("study-1", "run-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +169,29 @@ func TestCleanupTuningRunCacheRemovesOnlyTargetAndInvalidatesUsage(t *testing.T)
 	if _, err := os.Stat(filepath.Join(out, "0.txt")); err != nil {
 		t.Fatalf("output was removed: %v", err)
 	}
-	if _, ok := m.usageCache["study-1"]; ok {
-		t.Fatal("usage cache was not invalidated")
+	if _, err := os.Stat(pahcerResult); err != nil {
+		t.Fatalf("pahcer result was removed: %v", err)
+	}
+	after := directorySize(filepath.Join(root, "ahc-plaza", "runs", "run-1"))
+	if before-after < 1<<20 {
+		t.Fatalf("cleanup freed only %d bytes", before-after)
+	}
+	if got := m.usageCache["study-1"].bytes; got != after+100 {
+		t.Fatalf("usage cache = %d, want %d", got, after+100)
+	}
+}
+
+func TestCleanupDeletionTrashAfterRestart(t *testing.T) {
+	root := t.TempDir()
+	trash := filepath.Join(root, "ahc-plaza", "runs", "run.deleting-token")
+	if err := os.MkdirAll(trash, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupDeletionTrash(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(trash); !os.IsNotExist(err) {
+		t.Fatalf("deletion trash remains: %v", err)
 	}
 }
 

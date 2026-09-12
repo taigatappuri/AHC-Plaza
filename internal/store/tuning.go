@@ -6,7 +6,68 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/taigatappuri/AHC-Plaza/internal/domain"
+	"sort"
 )
+
+func (s *SQLiteStore) DeleteTuningStudy(ctx context.Context, id string) ([]string, error) {
+	runIDs := []string{}
+	err := s.transaction(ctx, func(tx *sql.Tx) error {
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM tuning_studies WHERE id=?`, id).Scan(&exists); err != nil {
+			return err
+		}
+		if exists != 1 {
+			return sql.ErrNoRows
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT id FROM runs WHERE tuning_study=? ORDER BY id`, id)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var runID string
+			if err := rows.Scan(&runID); err != nil {
+				rows.Close()
+				return err
+			}
+			runIDs = append(runIDs, runID)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, query := range []string{
+			`DELETE FROM cases WHERE run_id IN (SELECT id FROM runs WHERE tuning_study=?)`,
+			`DELETE FROM input_cases WHERE run_id IN (SELECT id FROM runs WHERE tuning_study=?)`,
+			`DELETE FROM runs WHERE tuning_study=?`,
+			`DELETE FROM tuning_outbox WHERE study_id=?`,
+			`DELETE FROM tuning_trials WHERE study_id=?`,
+			`DELETE FROM tuning_studies WHERE id=?`,
+		} {
+			if _, err := tx.ExecContext(ctx, query, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	sort.Strings(runIDs)
+	return runIDs, err
+}
+
+func (s *SQLiteStore) TuningRunIDs(ctx context.Context, id string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM runs WHERE tuning_study=? ORDER BY id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
 
 func (s *SQLiteStore) migrateTuning(ctx context.Context) error {
 	for _, q := range []string{

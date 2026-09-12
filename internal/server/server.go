@@ -156,7 +156,7 @@ func (s *Server) runFailure(runID string) string {
 // Handler はAPIと埋め込み済みフロントエンドを同じHTTPサーバーへ登録します。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	for _, method := range []string{"GET", "POST", "PUT"} {
+	for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
 		mux.HandleFunc(method+" /api/tuning/", s.handleTuning)
 	}
 	for _, method := range []string{"GET", "POST", "PUT"} {
