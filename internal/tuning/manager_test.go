@@ -129,6 +129,103 @@ func TestBuildCompatibilityReportsSourceTargetChange(t *testing.T) {
 	}
 }
 
+func TestCleanupTuningRunCacheRemovesOnlyTargetAndInvalidatesUsage(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "ahc-plaza", "runs", "run-1", "workspace", "tools", "target")
+	out := filepath.Join(root, "ahc-plaza", "runs", "run-1", "workspace", "tools", "out")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(out, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "cache"), []byte("large"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "0.txt"), []byte("result"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Root: root, usageCache: map[string]usageSample{"study-1": {bytes: 123}}}
+	if err := m.cleanupTuningRunCache("study-1", "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "0.txt")); err != nil {
+		t.Fatalf("output was removed: %v", err)
+	}
+	if _, ok := m.usageCache["study-1"]; ok {
+		t.Fatal("usage cache was not invalidated")
+	}
+}
+
+func TestCleanupTuningRunCacheRejectsUnsafePaths(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(root, "outside")
+	target := filepath.Join(outside, "tools", "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(target, "keep")
+	if err := os.WriteFile(marker, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Root: root}
+	if err := m.cleanupTuningRunCache("study", "../outside"); err == nil {
+		t.Fatal("unsafe run ID was accepted")
+	}
+	runDir := filepath.Join(root, "ahc-plaza", "runs", "run-1")
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(runDir, "workspace")); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.cleanupTuningRunCache("study", "run-1"); err == nil {
+		t.Fatal("symlinked workspace was accepted")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("outside marker was touched: %v", err)
+	}
+}
+
+func TestEvaluateCleansCacheOnEarlyFailure(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "ahc-plaza", "runs", "run-1", "workspace", "tools", "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Root: root}
+	if _, err := m.evaluate(context.Background(), domain.TuningStudy{ID: "study-1"}, Manifest{}, "run-1", nil); err == nil {
+		t.Fatal("missing fixed source was accepted")
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target remains after evaluation failure: %v", err)
+	}
+}
+
+func TestCleanupSavedTuningRunCachesIncludesBaselineAndRecoveredTrials(t *testing.T) {
+	root := t.TempDir()
+	for _, runID := range []string{"baseline", "completed", "interrupted"} {
+		target := filepath.Join(root, "ahc-plaza", "runs", runID, "workspace", "tools", "target")
+		if err := os.MkdirAll(target, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := &Manager{Root: root}
+	m.cleanupSavedTuningRunCaches("study", "baseline", []domain.TuningTrial{
+		{RunID: "completed", Status: "COMPLETE"},
+		{RunID: "interrupted", Status: "RUNNING"},
+	})
+	for _, runID := range []string{"baseline", "completed", "interrupted"} {
+		target := filepath.Join(root, "ahc-plaza", "runs", runID, "workspace", "tools", "target")
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Fatalf("%s target remains: %v", runID, err)
+		}
+	}
+}
+
 func TestInspectBuildFingerprintChangesWithExecutable(t *testing.T) {
 	bin := t.TempDir()
 	for _, program := range []string{"make", "pahcer"} {

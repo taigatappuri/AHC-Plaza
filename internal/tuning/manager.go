@@ -444,6 +444,7 @@ func (m *Manager) run(ctx context.Context, a *activity, s *domain.TuningStudy, v
 		if t.Status == "RUNNING" {
 			m.recoverTrial(ctx, t, len(v.Prepared.Inputs))
 		}
+		m.cleanupSavedTuningRunCaches(s.ID, "", []domain.TuningTrial{*t})
 		if !t.Delivered {
 			if e = m.deliver(ctx, w, t); e != nil {
 				fail(e)
@@ -451,6 +452,7 @@ func (m *Manager) run(ctx context.Context, a *activity, s *domain.TuningStudy, v
 			}
 		}
 	}
+	m.cleanupSavedTuningRunCaches(s.ID, s.BaselineRun, nil)
 	if s.BaselineValue == nil {
 		run, e := m.Store.GetRun(ctx, s.BaselineRun)
 		if e == nil {
@@ -633,6 +635,11 @@ type CandidateError struct{ Err error }
 func (e *CandidateError) Error() string { return e.Err.Error() }
 func (e *CandidateError) Unwrap() error { return e.Err }
 func (m *Manager) evaluate(ctx context.Context, s domain.TuningStudy, v Manifest, runID string, values map[string]float64) (float64, error) {
+	defer func() {
+		if e := m.cleanupTuningRunCache(s.ID, runID); e != nil {
+			fmt.Fprintln(os.Stderr, "tuning cache cleanup:", e)
+		}
+	}()
 	dir, _ := m.dir(s.ID)
 	original, e := os.ReadFile(filepath.Join(dir, "fixed", "original.cpp"))
 	if e != nil {
@@ -673,6 +680,60 @@ func (m *Manager) evaluate(ctx context.Context, s domain.TuningStudy, v Manifest
 	}
 	return value, nil
 }
+
+func (m *Manager) cleanupTuningRunCache(studyID, runID string) error {
+	m.mu.Lock()
+	delete(m.usageCache, studyID)
+	m.mu.Unlock()
+	if runID == "" || !filepath.IsLocal(runID) || strings.ContainsAny(runID, "/\\") || strings.HasPrefix(runID, ".") {
+		return fmt.Errorf("Run IDが不正です")
+	}
+	runDir := filepath.Join(m.Root, "ahc-plaza", "runs", runID)
+	workspace := filepath.Join(runDir, "workspace")
+	tools := filepath.Join(workspace, "tools")
+	for _, path := range []string{runDir, workspace, tools} {
+		info, e := os.Lstat(path)
+		if os.IsNotExist(e) {
+			return nil
+		}
+		if e != nil {
+			return e
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("チューニングRunのキャッシュ用パスが通常のディレクトリではありません: %s", path)
+		}
+	}
+	target := filepath.Join(tools, "target")
+	info, e := os.Lstat(target)
+	if os.IsNotExist(e) {
+		return nil
+	}
+	if e != nil {
+		return e
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("チューニングRunのtargetキャッシュが通常のディレクトリではありません")
+	}
+	return os.RemoveAll(target)
+}
+
+func (m *Manager) cleanupSavedTuningRunCaches(studyID, baselineRun string, trials []domain.TuningTrial) {
+	runIDs := make([]string, 0, len(trials)+1)
+	if baselineRun != "" {
+		runIDs = append(runIDs, baselineRun)
+	}
+	for _, trial := range trials {
+		if trial.RunID != "" {
+			runIDs = append(runIDs, trial.RunID)
+		}
+	}
+	for _, runID := range runIDs {
+		if e := m.cleanupTuningRunCache(studyID, runID); e != nil {
+			fmt.Fprintln(os.Stderr, "saved tuning cache cleanup:", e)
+		}
+	}
+}
+
 func (m *Manager) recoverTrial(ctx context.Context, t *domain.TuningTrial, count int) {
 	run, e := m.Store.GetRun(ctx, t.RunID)
 	results, re := m.Store.GetCaseResults(ctx, t.RunID)
