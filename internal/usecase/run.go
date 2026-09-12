@@ -127,8 +127,14 @@ func executeRun(ctx context.Context, request RunRequest, database *store.SQLiteS
 	if err != nil {
 		return RunSummary{}, err
 	}
+	projectDir, sourceTarget := "", ""
+	if request.Prepared != nil {
+		projectDir = request.Prepared.ProjectDir
+		sourceTarget = request.Prepared.SourceTarget
+	}
 	workspace, err := pahcer.PrepareWorkspace(runDir, source.SnapshotPath, toolsDir, settingFile, inputCases, pahcer.WorkspaceOptions{
 		Threads: request.Threads, CaseTimeoutMilliseconds: request.TimeoutMilliseconds, CaseRunner: caseRunner,
+		ProjectDir: projectDir, SourceTarget: sourceTarget,
 	})
 	if err != nil {
 		return RunSummary{}, err

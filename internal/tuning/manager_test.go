@@ -16,41 +16,120 @@ import (
 	"github.com/taigatappuri/AHC-Plaza/internal/usecase"
 )
 
-func TestInspectToolsValidatesCandidateBuild(t *testing.T) {
+func TestInspectBuildAcceptsArbitraryPipelineAndInfersSource(t *testing.T) {
 	bin := t.TempDir()
-	for _, program := range []string{"g++", "pahcer", "cargo"} {
+	for _, program := range []string{"mkdir", "g++", "pahcer", "cargo", "make", "ccache"} {
 		if err := os.WriteFile(filepath.Join(bin, program), []byte("#!/bin/sh\necho test-version\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("PATH", bin)
 	for _, tc := range []struct {
-		name, compile, evaluation, wantError string
+		name, compile, evaluation, selected, explicit, wantSource, wantError string
 	}{
-		{"direct", `args=["main.cpp", "-o", "main.exe"]`, `program="./main.exe"`, ""},
-		{"tester", `args=["main.cpp", "-o", "main.exe"]`, "program=\"./tools/target/release/tester\"\nargs=[\"./main.exe\"]", ""},
-		{"cargo tester", "args=[\"main.cpp\", \"-o\", \"main.exe\"]\n[[test.compile_steps]]\nprogram=\"cargo\"\nargs=[\"build\", \"--release\"]\ncurrent_dir=\"tools\"", `program="./main.exe"`, ""},
-		{"different binary", `args=["main.cpp", "-o", "main.exe"]`, `program="./old.exe"`, "test_steps"},
-		{"other source", `args=["main.cpp", "helper.cpp"]`, `program="./a.out"`, "別ソース"},
-		{"external include", `args=["main.cpp", "-I../include"]`, `program="./a.out"`, "外部ソース"},
-		{"overwrites source", `args=["main.cpp", "-o", "main.cpp"]`, `program="./main.cpp"`, "出力先"},
-		{"external workspace", `args=["main.cpp"]`, "program=\"./a.out\"\ncurrent_dir=\"../old\"", "作業場所"},
+		{"ahc065", "program=\"mkdir\"\nargs=[\"-p\",\"build\"]\n[[test.compile_steps]]\nprogram=\"g++\"\nargs=[\"-Iinclude\",\"main.cpp\",\"-o\",\"build/pahcer_main\"]\n[[test.compile_steps]]\nprogram=\"cargo\"\nargs=[\"build\",\"--release\"]\ncurrent_dir=\"tools\"", `program="./build/pahcer_main"`, "solver/main.cpp", "", "main.cpp", ""},
+		{"named source", "program=\"g++\"\nargs=[\"ankake.cpp\",\"-o\",\"main\"]", `program="./main"`, "solver/ankake.cpp", "", "ankake.cpp", ""},
+		{"make and script", "program=\"make\"\nargs=[\"solver\"]\n[[test.compile_steps]]\nprogram=\"./scripts/build.sh\"\nargs=[\"src/a.cpp\",\"src/b.cpp\"]", `program="./build/solver"`, "solver/main.cpp", "solver/main.cpp", "solver/main.cpp", ""},
+		{"new explicit target", `program="make"`, `program="./build/solver"`, "solver/main.cpp", "generated/main.cpp", "generated/main.cpp", ""},
+		{"ambiguous", "program=\"g++\"\nargs=[\"a.cpp\",\"b.cpp\"]", `program="./a.out"`, "solver/chosen.cpp", "", "", "複数"},
+		{"empty program", `program=""`, `program="./a.out"`, "solver/main.cpp", "", "", "compile_steps[0].program"},
+		{"external workspace", "program=\"g++\"\nargs=[\"main.cpp\"]\ncurrent_dir=\"../old\"", `program="./a.out"`, "solver/main.cpp", "", "", "compile_steps[0].current_dir"},
+		{"invalid test cwd", "program=\"g++\"\nargs=[\"main.cpp\"]", "program=\"./a.out\"\ncurrent_dir=\"../../outside\"", "solver/main.cpp", "", "", "test_steps[0].current_dir"},
+		{"unresolved bare test", `program="make"`, `program="missing-tester"`, "solver/main.cpp", "", "", "test_steps[0].program"},
+		{"missing stdin", `program="make"`, `program="./built"`, "solver/main.cpp", "", "", "stdin"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setting := filepath.Join(t.TempDir(), "pahcer.toml")
-			content := "[[test.compile_steps]]\nprogram=\"g++\"\n" + tc.compile + "\n[[test.test_steps]]\n" + tc.evaluation + "\n"
+			evaluation := tc.evaluation
+			if tc.name != "missing stdin" {
+				evaluation += "\nstdin=\"in\""
+			}
+			content := "[[test.compile_steps]]\n" + tc.compile + "\n[[test.test_steps]]\n" + evaluation + "\n"
 			if err := os.WriteFile(setting, []byte(content), 0600); err != nil {
 				t.Fatal(err)
 			}
-			versions, err := inspectTools(context.Background(), setting)
+			project := t.TempDir()
+			for _, name := range []string{"solver/main.cpp", "solver/ankake.cpp", "solver/chosen.cpp", "main.cpp", "ankake.cpp", "a.cpp", "b.cpp", "scripts/build.sh"} {
+				path := filepath.Join(project, name)
+				os.MkdirAll(filepath.Dir(path), 0755)
+				os.WriteFile(path, []byte(name), 0755)
+			}
+			inspection, err := inspectBuild(context.Background(), setting, project, tc.selected, tc.explicit)
 			if tc.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 					t.Fatalf("want %q, got %v", tc.wantError, err)
 				}
-			} else if err != nil || len(versions) != 3 {
-				t.Fatalf("versions=%v error=%v", versions, err)
+			} else if err != nil || inspection.SourceTarget != tc.wantSource || len(inspection.Tools) == 0 {
+				t.Fatalf("inspection=%+v error=%v", inspection, err)
 			}
 		})
+	}
+}
+
+func TestInferSourceTargetAllowsNewUniqueCompilePath(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "solver"), 0755)
+	os.WriteFile(filepath.Join(root, "solver", "main.cpp"), []byte("x"), 0644)
+	target, err := inferSourceTarget(root, "solver/main.cpp", "", []buildStep{{Program: "g++", Args: []string{"main.cpp"}}})
+	if err != nil || target != "main.cpp" {
+		t.Fatalf("target=%q err=%v", target, err)
+	}
+}
+
+func TestInspectBuildRequiresTestSteps(t *testing.T) {
+	bin := t.TempDir()
+	for _, name := range []string{"make", "pahcer"} {
+		os.WriteFile(filepath.Join(bin, name), []byte("x"), 0700)
+	}
+	t.Setenv("PATH", bin)
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "main.cpp"), []byte("x"), 0644)
+	setting := filepath.Join(root, "p.toml")
+	os.WriteFile(setting, []byte("[[test.compile_steps]]\nprogram=\"make\"\n"), 0644)
+	if _, err := inspectBuild(context.Background(), setting, root, "main.cpp", ""); err == nil || !strings.Contains(err.Error(), "test_steps") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestValidationPreparedUsesStudyBuildAssets(t *testing.T) {
+	fixed := usecase.PreparedRun{ProjectDir: "fixed/project", SourceTarget: "solver/ankake.cpp", ToolsDir: "fixed/tools", SettingFile: "fixed/pahcer.toml", ConfigHash: "fixed"}
+	inputs := usecase.PreparedRun{InputDir: "validation/inputs", Inputs: []domain.InputCase{{ID: "new"}}, ProjectDir: "validation/project", SourceTarget: "main.cpp", ToolsDir: "validation/tools", SettingFile: "validation/pahcer.toml"}
+	got := validationPrepared(inputs, fixed)
+	if got.ProjectDir != fixed.ProjectDir || got.SourceTarget != fixed.SourceTarget || got.ToolsDir != fixed.ToolsDir || got.SettingFile != fixed.SettingFile || got.InputDir != inputs.InputDir || len(got.Inputs) != 1 {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestManifestV1CannotResume(t *testing.T) {
+	m := &Manager{}
+	if err := m.verify(context.Background(), domain.TuningStudy{}, Manifest{Version: 1}); err == nil || !strings.Contains(err.Error(), "閲覧と書き出し") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestInspectBuildFingerprintChangesWithExecutable(t *testing.T) {
+	bin := t.TempDir()
+	for _, program := range []string{"make", "pahcer"} {
+		if err := os.WriteFile(filepath.Join(bin, program), []byte("first"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	project := t.TempDir()
+	os.WriteFile(filepath.Join(project, "main.cpp"), []byte("int main(){}"), 0600)
+	setting := filepath.Join(project, "pahcer.toml")
+	os.WriteFile(setting, []byte("[[test.compile_steps]]\nprogram=\"make\"\n[[test.test_steps]]\nprogram=\"./main\"\nstdin=\"in\"\n"), 0600)
+	first, err := inspectBuild(context.Background(), setting, project, "main.cpp", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(bin, "make"), []byte("second"), 0700)
+	second, err := inspectBuild(context.Background(), setting, project, "main.cpp", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sameJSON(first.Tools, second.Tools) {
+		t.Fatal("executable change was not detected")
 	}
 }
 
@@ -106,6 +185,21 @@ func TestBestIncludesBaselineForBothDirections(t *testing.T) {
 	updateBest(&s, trials[:1], "maximize")
 	if s.BestRun != "baseline" {
 		t.Fatal(s)
+	}
+}
+
+func TestBaselineRetryClassification(t *testing.T) {
+	for _, tc := range []struct {
+		status        domain.RunStatus
+		retry, active bool
+	}{
+		{domain.RunSucceeded, true, false}, {domain.RunPartial, true, false}, {domain.RunFailed, true, false}, {domain.RunCancelled, true, false},
+		{domain.RunQueued, true, true}, {domain.RunRunning, true, true}, {domain.RunStatus("unknown"), false, false},
+	} {
+		retry, active := baselineRetryClassification(tc.status)
+		if retry != tc.retry || active != tc.active {
+			t.Fatalf("status=%s retry=%v active=%v", tc.status, retry, active)
+		}
 	}
 }
 func TestPendingAskReconcilesExistingTrial(t *testing.T) {

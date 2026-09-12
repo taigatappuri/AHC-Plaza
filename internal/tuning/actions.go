@@ -132,19 +132,14 @@ func (m *Manager) Validate(ctx context.Context, id string, r ValidationRequest) 
 		return result, e
 	}
 	dir, _ := m.dir(id)
-	prepared, e := usecase.PrepareTuningInputs(ctx, usecase.RunRequest{ConfigPath: m.ConfigPath, InputDir: r.InputDir}, filepath.Join(dir, "validations", validationID))
+	prepared, e := usecase.PrepareTuningValidationInputs(ctx, usecase.RunRequest{ConfigPath: m.ConfigPath, InputDir: r.InputDir}, filepath.Join(dir, "validations", validationID))
 	if e != nil {
 		return result, e
 	}
 	if sameInputs(prepared, v.Prepared) {
 		return result, fmt.Errorf("探索に使っていない別入力セットを選んでください")
 	}
-	prepared.Config = v.Prepared.Config
-	prepared.ConfigHash = v.Prepared.ConfigHash
-	prepared.CompilerVersion = v.Prepared.CompilerVersion
-	prepared.PahcerVersion = v.Prepared.PahcerVersion
-	prepared.ToolsDir = v.Prepared.ToolsDir
-	prepared.SettingFile = v.Prepared.SettingFile
+	prepared = validationPrepared(prepared, v.Prepared)
 	v.Prepared = prepared
 	v.Request.Threads = r.Threads
 	result.BaselineRun, e = usecase.NewRunID()
@@ -182,6 +177,18 @@ func (m *Manager) Validate(ctx context.Context, id string, r ValidationRequest) 
 		}
 	}()
 	return result, nil
+}
+
+func validationPrepared(inputs, fixed usecase.PreparedRun) usecase.PreparedRun {
+	inputs.Config = fixed.Config
+	inputs.ConfigHash = fixed.ConfigHash
+	inputs.CompilerVersion = fixed.CompilerVersion
+	inputs.PahcerVersion = fixed.PahcerVersion
+	inputs.ToolsDir = fixed.ToolsDir
+	inputs.SettingFile = fixed.SettingFile
+	inputs.ProjectDir = fixed.ProjectDir
+	inputs.SourceTarget = fixed.SourceTarget
+	return inputs
 }
 func sameInputs(a, b usecase.PreparedRun) bool {
 	hashes := map[string]bool{}

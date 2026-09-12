@@ -21,6 +21,8 @@ type WorkspaceOptions struct {
 	Threads                 int
 	CaseTimeoutMilliseconds int
 	CaseRunner              string
+	ProjectDir              string
+	SourceTarget            string
 }
 
 func PrepareWorkspace(runDir, sourceSnapshot, toolsDir, settingFile string, inputCases []domain.InputCase, options WorkspaceOptions) (Workspace, error) {
@@ -32,13 +34,25 @@ func PrepareWorkspace(runDir, sourceSnapshot, toolsDir, settingFile string, inpu
 		return Workspace{}, fmt.Errorf("could not create pahcer workspace: %w", err)
 	}
 
-	if err := copyFile(sourceSnapshot, filepath.Join(workspaceDir, "main.cpp"), 0o644); err != nil {
-		return Workspace{}, fmt.Errorf("could not copy solver to workspace: %w", err)
+	if options.ProjectDir != "" {
+		if err := copyTree(options.ProjectDir, workspaceDir); err != nil {
+			return Workspace{}, fmt.Errorf("could not copy fixed project: %w", err)
+		}
+	}
+	target := options.SourceTarget
+	if target == "" {
+		target = "main.cpp"
+	}
+	if filepath.IsAbs(target) || !filepath.IsLocal(target) {
+		return Workspace{}, fmt.Errorf("source target must be inside workspace: %q", target)
 	}
 	if info, err := os.Stat(toolsDir); err == nil && info.IsDir() {
-		if err := os.CopyFS(filepath.Join(workspaceDir, "tools"), os.DirFS(toolsDir)); err != nil {
+		if err := copyTree(toolsDir, filepath.Join(workspaceDir, "tools")); err != nil {
 			return Workspace{}, fmt.Errorf("could not copy tools to workspace: %w", err)
 		}
+	}
+	if err := copyFile(sourceSnapshot, filepath.Join(workspaceDir, filepath.FromSlash(target)), 0o644); err != nil {
+		return Workspace{}, fmt.Errorf("could not copy solver to workspace: %w", err)
 	}
 
 	inputDir := filepath.Join(workspaceDir, "tools", "in")
@@ -62,6 +76,36 @@ func PrepareWorkspace(runDir, sourceSnapshot, toolsDir, settingFile string, inpu
 		return Workspace{}, err
 	}
 	return Workspace{Dir: workspaceDir, SettingFile: filepath.Base(settingDestination)}, nil
+}
+
+func copyTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return os.MkdirAll(destination, 0755)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink is not allowed: %s", rel)
+		}
+		dst := filepath.Join(destination, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(dst, info.Mode().Perm())
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("only regular files are allowed: %s", rel)
+		}
+		return copyFile(path, dst, info.Mode().Perm())
+	})
 }
 
 func rewriteSettingFile(source, destination string, inputCaseCount int, options WorkspaceOptions) error {

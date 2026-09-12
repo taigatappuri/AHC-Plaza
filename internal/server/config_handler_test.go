@@ -23,6 +23,7 @@ func TestConfigAPIUpdatesAHCPlazaTOML(t *testing.T) {
 		"pahcer":{"setting_file":"tester/pahcer.toml"},
 		"score":{"invalid_score":-1,"include_invalid_cases":false},
 		"statistics":{"confidence_level":0.99,"bootstrap_iterations":20000},
+		"tuning":{"source_target":"generated/main.cpp"},
 		"input_format":{"variables":[{"name":"N","line":1,"column":1},{"name":"M","line":1,"column":2}],"features":[{"name":"average","source":"features/average.cpp","timeout_ms":2000}]}
 	}`
 	request := httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(body))
@@ -39,6 +40,9 @@ func TestConfigAPIUpdatesAHCPlazaTOML(t *testing.T) {
 	}
 	if received.Project.Problem != "demo-next" || received.Paths.SolverDir != "src" || received.Score.IncludeInvalidCases {
 		t.Fatalf("response = %#v", received)
+	}
+	if received.Tuning.SourceTarget != "generated/main.cpp" {
+		t.Fatalf("tuning = %#v", received.Tuning)
 	}
 	if len(received.InputFormat.Variables) != 2 || received.InputFormat.Variables[1].Name != "M" {
 		t.Fatalf("input format = %#v", received.InputFormat)
