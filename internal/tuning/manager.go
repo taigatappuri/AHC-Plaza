@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,9 @@ import (
 )
 
 var ErrSourceChanged = errors.New("ソースが変更されています。再検出してください")
+
+// caseExecCompatibilityVersionはケース実行または結果評価の互換性を壊す変更時に増やします。
+const caseExecCompatibilityVersion = 1
 
 type StartRequest struct {
 	Solver     string             `json:"solver"`
@@ -40,6 +44,7 @@ type Manifest struct {
 	Optuna           string              `json:"optuna"`
 	ParserVersion    int                 `json:"parser_version"`
 	ObjectiveVersion string              `json:"objective_version"`
+	CaseExecVersion  int                 `json:"case_exec_version,omitempty"`
 	Version          int                 `json:"version"`
 	WorkerHash       string              `json:"worker_hash"`
 	RuntimeHash      string              `json:"runtime_hash"`
@@ -193,9 +198,9 @@ func (m *Manager) Start(ctx context.Context, r StartRequest) (domain.TuningStudy
 	if e != nil {
 		return s, e
 	}
-	p.CompilerVersion = "see tuning manifest v2"
-	p.PahcerVersion = "see tuning manifest v2"
-	manifest := Manifest{Python: info.Python, Optuna: info.Optuna, ParserVersion: params.Version, ObjectiveVersion: "raw-mean-v1", Version: 2, WorkerHash: workerHash(), RuntimeHash: info.SHA256, PlazaVersion: m.Version, Prepared: p, Request: r, SourceHash: scan.Hash, Parameters: ps, Files: files, Tools: inspection.Tools}
+	p.CompilerVersion = "see tuning manifest v3"
+	p.PahcerVersion = "see tuning manifest v3"
+	manifest := Manifest{Python: info.Python, Optuna: info.Optuna, ParserVersion: params.Version, ObjectiveVersion: "raw-mean-v1", CaseExecVersion: caseExecCompatibilityVersion, Version: 3, WorkerHash: workerHash(), RuntimeHash: info.SHA256, PlazaVersion: m.Version, Prepared: p, Request: r, SourceHash: scan.Hash, Parameters: ps, Files: files, Tools: inspection.Tools}
 	b, e := json.MarshalIndent(manifest, "", "  ")
 	if e != nil {
 		return s, e
@@ -267,7 +272,13 @@ func (m *Manager) verify(ctx context.Context, s domain.TuningStudy, v Manifest) 
 	if v.Version == 1 {
 		return fmt.Errorf("manifest v1のStudyは閲覧と書き出しのみ対応しています。再開するには新しいStudyを作成してください")
 	}
-	if v.Version != 2 || v.ParserVersion != params.Version || v.ObjectiveVersion != "raw-mean-v1" || v.WorkerHash != workerHash() || v.RuntimeHash != bundled.Status(m.Root).SHA256 || v.PlazaVersion != m.Version {
+	if v.Version != 2 && v.Version != 3 {
+		return fmt.Errorf("未対応のmanifest version %dです。新しいStudyを作成してください", v.Version)
+	}
+	if e := verifyCaseExecCompatibility(v); e != nil {
+		return e
+	}
+	if v.ParserVersion != params.Version || v.ObjectiveVersion != "raw-mean-v1" || v.WorkerHash != workerHash() || v.RuntimeHash != bundled.Status(m.Root).SHA256 || v.PlazaVersion != m.Version {
 		return fmt.Errorf("Plazaまたは同梱環境の版が変わっています。環境を復元するか新しいStudyを作成してください")
 	}
 	dir, _ := m.dir(s.ID)
@@ -282,8 +293,45 @@ func (m *Manager) verify(ctx context.Context, s domain.TuningStudy, v Manifest) 
 	if e != nil {
 		return e
 	}
-	if !sameJSON(inspection.Tools, v.Tools) || inspection.SourceTarget != v.Prepared.SourceTarget {
-		return fmt.Errorf("コンパイラまたはpahcer等が変更されています。保存時の環境を復元してください")
+	return verifyBuildCompatibility(v, inspection)
+}
+
+func verifyCaseExecCompatibility(v Manifest) error {
+	if v.Version == 3 && v.CaseExecVersion != caseExecCompatibilityVersion {
+		return fmt.Errorf("case-exec互換性が変わっています。新しいStudyを作成してください")
+	}
+	return nil
+}
+
+func verifyBuildCompatibility(v Manifest, current BuildInspection) error {
+	if current.SourceTarget != v.Prepared.SourceTarget {
+		return fmt.Errorf("source_targetが変更されています。保存時の設定を復元してください")
+	}
+	savedTools := v.Tools
+	if v.Version == 2 {
+		savedTools = make(map[string]string, len(v.Tools))
+		for key, value := range v.Tools {
+			if key != "runner:ahc-plaza" {
+				savedTools[key] = value
+			}
+		}
+	}
+	keys := make(map[string]struct{}, len(savedTools)+len(current.Tools))
+	for key := range savedTools {
+		keys[key] = struct{}{}
+	}
+	for key := range current.Tools {
+		keys[key] = struct{}{}
+	}
+	ordered := make([]string, 0, len(keys))
+	for key := range keys {
+		ordered = append(ordered, key)
+	}
+	sort.Strings(ordered)
+	for _, key := range ordered {
+		if savedTools[key] != current.Tools[key] {
+			return fmt.Errorf("外部ツール %q が変更されています。保存時の環境を復元してください", key)
+		}
 	}
 	return nil
 }

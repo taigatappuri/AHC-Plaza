@@ -98,6 +98,37 @@ func TestManifestV1CannotResume(t *testing.T) {
 	}
 }
 
+func TestLegacyManifestV2IgnoresOnlyAHCPlazaFingerprint(t *testing.T) {
+	saved := Manifest{Version: 2, Prepared: usecase.PreparedRun{SourceTarget: "main.cpp"}, Tools: map[string]string{
+		"compile_steps[0]:g++": "g++-same",
+		"runner:ahc-plaza":     "old-self-binary",
+	}}
+	current := BuildInspection{SourceTarget: "main.cpp", Tools: map[string]string{
+		"compile_steps[0]:g++": "g++-same",
+	}}
+	if err := verifyBuildCompatibility(saved, current); err != nil {
+		t.Fatalf("self binary difference must be ignored for v2: %v", err)
+	}
+	current.Tools["compile_steps[0]:g++"] = "changed-g++"
+	if err := verifyBuildCompatibility(saved, current); err == nil || !strings.Contains(err.Error(), "compile_steps[0]:g++") {
+		t.Fatalf("external tool difference must identify its key: %v", err)
+	}
+}
+
+func TestManifestV3RejectsCaseExecCompatibilityChange(t *testing.T) {
+	v := Manifest{Version: 3, CaseExecVersion: caseExecCompatibilityVersion + 1}
+	if err := verifyCaseExecCompatibility(v); err == nil || !strings.Contains(err.Error(), "case-exec互換性") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBuildCompatibilityReportsSourceTargetChange(t *testing.T) {
+	v := Manifest{Version: 3, Prepared: usecase.PreparedRun{SourceTarget: "main.cpp"}}
+	if err := verifyBuildCompatibility(v, BuildInspection{SourceTarget: "solver.cpp"}); err == nil || !strings.Contains(err.Error(), "source_target") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestInspectBuildFingerprintChangesWithExecutable(t *testing.T) {
 	bin := t.TempDir()
 	for _, program := range []string{"make", "pahcer"} {
@@ -121,6 +152,9 @@ func TestInspectBuildFingerprintChangesWithExecutable(t *testing.T) {
 	}
 	if sameJSON(first.Tools, second.Tools) {
 		t.Fatal("executable change was not detected")
+	}
+	if _, ok := first.Tools["runner:ahc-plaza"]; ok {
+		t.Fatal("new manifests must not fingerprint the AHC Plaza executable")
 	}
 }
 

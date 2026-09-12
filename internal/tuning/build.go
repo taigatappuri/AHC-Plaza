@@ -98,15 +98,6 @@ func inspectBuild(ctx context.Context, setting, projectRoot, selectedSolver, exp
 	} else {
 		return BuildInspection{}, err
 	}
-	caseRunner, err := os.Executable()
-	if err != nil {
-		return BuildInspection{}, err
-	}
-	caseRunnerBytes, err := os.ReadFile(caseRunner)
-	if err != nil {
-		return BuildInspection{}, err
-	}
-	tools["runner:ahc-plaza"] = caseRunner + "\n" + params.Hash(caseRunnerBytes)
 	target, err := inferSourceTarget(projectRoot, selectedSolver, explicitTarget, compile)
 	if err != nil {
 		return BuildInspection{}, err
