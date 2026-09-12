@@ -31,7 +31,6 @@ func executeTune(args []string) error {
 	trials := f.Int("trials", 100, "additional candidate count")
 	threads := f.Int("threads", 0, "case workers (0: automatic)")
 	timeout := f.Int("timeout-ms", 0, "case timeout")
-	seconds := f.Int("seconds", 0, "total active-time budget (0: unlimited)")
 	seed := f.Int("seed", 42, "sampler seed")
 	id := f.String("study", "", "saved Study ID")
 	additional := f.Int("additional-trials", 0, "increase saved trial budget")
@@ -96,7 +95,7 @@ func executeTune(args []string) error {
 				return e
 			}
 		}
-		s, e := m.Start(ctx, tuning.StartRequest{Solver: *solver, InputDir: *input, SourceHash: scan.Hash, Parameters: parameters, Trials: *trials, Threads: *threads, TimeoutMS: *timeout, Seconds: *seconds, Seed: *seed})
+		s, e := m.Start(ctx, tuning.StartRequest{Solver: *solver, InputDir: *input, SourceHash: scan.Hash, Parameters: parameters, Trials: *trials, Threads: *threads, TimeoutMS: *timeout, Seed: *seed})
 		if e != nil {
 			return e
 		}
@@ -107,11 +106,6 @@ func executeTune(args []string) error {
 			return e
 		}
 		*id = s.ID
-	case "validate":
-		_, e := m.Validate(ctx, *id, tuning.ValidationRequest{InputDir: *input, Threads: *threads})
-		if e != nil {
-			return e
-		}
 	default:
 		return fmt.Errorf("unknown tune operation: %s", action)
 	}

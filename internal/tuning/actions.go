@@ -12,7 +12,6 @@ import (
 
 	"github.com/taigatappuri/AHC-Plaza/internal/domain"
 	"github.com/taigatappuri/AHC-Plaza/internal/tuning/params"
-	"github.com/taigatappuri/AHC-Plaza/internal/usecase"
 )
 
 type Export struct {
@@ -97,112 +96,6 @@ func (m *Manager) Export(ctx context.Context, id string, number *int) (Export, e
 	return Export{Path: rel, Source: string(source), Parameters: values}, nil
 }
 
-type ValidationRequest struct {
-	InputDir string `json:"input_dir"`
-	Number   *int   `json:"number"`
-	Threads  int    `json:"threads"`
-}
-
-func (m *Manager) Validate(ctx context.Context, id string, r ValidationRequest) (domain.TuningValidation, error) {
-	m.operationMu.Lock()
-	defer m.operationMu.Unlock()
-	result := domain.TuningValidation{InputDir: r.InputDir}
-	s, v, e := m.Load(ctx, id)
-	if e != nil {
-		return result, e
-	}
-	if m.Busy() {
-		return result, fmt.Errorf("実行中のStudyを停止してから検証してください")
-	}
-	if e = m.verify(ctx, s, v); e != nil {
-		return result, e
-	}
-	values, e := m.candidate(ctx, s, r.Number)
-	if e != nil {
-		return result, e
-	}
-	if r.Threads < 0 || r.Threads > 256 {
-		return result, fmt.Errorf("並列数が不正です")
-	}
-	if r.Threads == 0 {
-		r.Threads = v.Request.Threads
-	}
-	validationID, e := usecase.NewRunID()
-	if e != nil {
-		return result, e
-	}
-	dir, _ := m.dir(id)
-	prepared, e := usecase.PrepareTuningValidationInputs(ctx, usecase.RunRequest{ConfigPath: m.ConfigPath, InputDir: r.InputDir}, filepath.Join(dir, "validations", validationID))
-	if e != nil {
-		return result, e
-	}
-	if sameInputs(prepared, v.Prepared) {
-		return result, fmt.Errorf("探索に使っていない別入力セットを選んでください")
-	}
-	prepared = validationPrepared(prepared, v.Prepared)
-	v.Prepared = prepared
-	v.Request.Threads = r.Threads
-	result.BaselineRun, e = usecase.NewRunID()
-	if e != nil {
-		return result, e
-	}
-	result.CandidateRun, e = usecase.NewRunID()
-	if e != nil {
-		return result, e
-	}
-	executionCtx, cancel := context.WithCancel(context.Background())
-	a := &activity{cancel: cancel, done: make(chan struct{})}
-	m.mu.Lock()
-	if m.closed || len(m.active) > 0 {
-		m.mu.Unlock()
-		cancel()
-		return result, fmt.Errorf("別の評価が実行中です")
-	}
-	m.active[id] = a
-	m.wg.Add(1)
-	m.mu.Unlock()
-	go func() {
-		defer m.wg.Done()
-		defer cancel()
-		defer func() { m.mu.Lock(); delete(m.active, id); m.mu.Unlock(); close(a.done) }()
-		validation := result
-		if _, e := m.evaluate(executionCtx, s, v, result.BaselineRun, nil); e != nil {
-			validation.Error = e.Error()
-		} else if _, e = m.evaluate(executionCtx, s, v, result.CandidateRun, values); e != nil {
-			validation.Error = e.Error()
-		}
-		s.Validations = append(s.Validations, validation)
-		if e = m.save(&s); e != nil {
-			fmt.Fprintln(os.Stderr, e)
-		}
-	}()
-	return result, nil
-}
-
-func validationPrepared(inputs, fixed usecase.PreparedRun) usecase.PreparedRun {
-	inputs.Config = fixed.Config
-	inputs.ConfigHash = fixed.ConfigHash
-	inputs.CompilerVersion = fixed.CompilerVersion
-	inputs.PahcerVersion = fixed.PahcerVersion
-	inputs.ToolsDir = fixed.ToolsDir
-	inputs.SettingFile = fixed.SettingFile
-	inputs.ProjectDir = fixed.ProjectDir
-	inputs.SourceTarget = fixed.SourceTarget
-	return inputs
-}
-func sameInputs(a, b usecase.PreparedRun) bool {
-	hashes := map[string]bool{}
-	for _, x := range b.Inputs {
-		hashes[x.SHA256] = true
-	}
-	for _, x := range a.Inputs {
-		if hashes[x.SHA256] {
-			return true
-		}
-	}
-	return false
-}
-
 type usageSample struct {
 	at    time.Time
 	bytes int64
@@ -236,9 +129,6 @@ func (m *Manager) Usage(id string) int64 {
 	ids := []string{s.BaselineRun}
 	for _, t := range ts {
 		ids = append(ids, t.RunID)
-	}
-	for _, v := range s.Validations {
-		ids = append(ids, v.BaselineRun, v.CandidateRun)
 	}
 	for _, id := range ids {
 		if id == "" {

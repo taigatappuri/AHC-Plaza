@@ -275,7 +275,7 @@ func executeRun(args []string) error {
 func printUsage() {
 	fmt.Println(`Usage:
   ahc-plaza init --problem <PROBLEM_NAME> --objective <max|min>
-  ahc-plaza tune [setup|resume|export|validate|clean-runtime] [OPTIONS]
+  ahc-plaza tune [setup|resume|export|clean-runtime] [OPTIONS]
   ahc-plaza doctor
   ahc-plaza run [OPTIONS]
   ahc-plaza gui [OPTIONS]

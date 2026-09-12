@@ -14,7 +14,7 @@ import time
 
 def fixture(root):
     (root / 'solver').mkdir()
-    for name, values in [('train', [3, 4]), ('validation', [5, 6])]:
+    for name, values in [('train', [3, 4])]:
         directory = root / 'ahc-plaza/inputs' / name
         directory.mkdir(parents=True)
         for index, value in enumerate(values):
@@ -96,12 +96,6 @@ def main():
         exported = json.loads(run('tune', 'export', '--study', identifier, '--best').stdout)
         run('run', '--solver', exported['path'], '--input-dir', 'ahc-plaza/inputs/train', '--threads', '1', '--json')
         assert original == (root / 'solver/main.cpp').read_bytes()
-        validation = json.loads(run('tune', 'validate', '--study', identifier, '--input-dir', 'ahc-plaza/inputs/validation', '--threads', '1').stdout)
-        assert len(validation['validations']) == 1 and not validation['validations'][0]['error'], validation
-        with sqlite3.connect(root / 'ahc-plaza/ahc-plaza.db') as db:
-            metadata = db.execute('SELECT config_hash,compiler_version,pahcer_version FROM runs WHERE id=?', (result['baseline_run'],)).fetchone()
-            for run_id in [validation['validations'][0]['baseline_run'], validation['validations'][0]['candidate_run']]:
-                assert db.execute('SELECT config_hash,compiler_version,pahcer_version FROM runs WHERE id=?', (run_id,)).fetchone() == metadata
         # Source/config/input edits must not enter subsequent trials of this Study.
         (root / 'solver/main.cpp').write_text('this is deliberately not C++')
         (root / 'ahc-plaza/inputs/train/0.txt').write_text('9999')
@@ -148,7 +142,7 @@ def main():
         run('tune', 'clean-runtime')
         assert not (root / 'ahc-plaza/runtime').exists()
         assert (root / 'ahc-plaza/tuning' / identifier / 'manifest.json').exists()
-        print(json.dumps({'result':'PASS', 'candidate_count':len(trials), 'successful':resumed['completed'], 'failed_or_interrupted':resumed['failed'], 'checks':['ordinary Run without runtime','offline bundled Python','real Optuna/C++/pahcer','export and rerun','held-out validation','frozen source/input','pause/resume','SIGKILL recovery','outbox reconciliation','tamper rejection','runtime cleanup']}, ensure_ascii=False))
+        print(json.dumps({'result':'PASS', 'candidate_count':len(trials), 'successful':resumed['completed'], 'failed_or_interrupted':resumed['failed'], 'checks':['ordinary Run without runtime','offline bundled Python','real Optuna/C++/pahcer','export and rerun','frozen source/input','pause/resume','SIGKILL recovery','outbox reconciliation','tamper rejection','runtime cleanup']}, ensure_ascii=False))
 
 if __name__ == '__main__':
     main()

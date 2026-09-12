@@ -249,15 +249,6 @@ func (s *Server) handleTuning(w http.ResponseWriter, r *http.Request) {
 		if !writeErrorIf(w, 400, e) {
 			writeJSON(w, 200, v)
 		}
-	case "validate":
-		var in tuning.ValidationRequest
-		if writeErrorIf(w, 400, decodeJSON(r, &in)) {
-			return
-		}
-		v, e := s.Tuning.Validate(r.Context(), id, in)
-		if !writeErrorIf(w, 400, e) {
-			writeJSON(w, 202, v)
-		}
 	default:
 		http.NotFound(w, r)
 	}

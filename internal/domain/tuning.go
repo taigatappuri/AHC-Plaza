@@ -9,7 +9,6 @@ type TuningStudy struct {
 	Trials         int                `json:"trials"`
 	Completed      int                `json:"completed"`
 	Failed         int                `json:"failed"`
-	Seconds        int                `json:"seconds"`
 	Elapsed        float64            `json:"elapsed"`
 	BaselineRun    string             `json:"baseline_run"`
 	BaselineValue  *float64           `json:"baseline_value"`
@@ -20,7 +19,6 @@ type TuningStudy struct {
 	ManifestHash   string             `json:"manifest_hash"`
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
-	Validations    []TuningValidation `json:"validations"`
 }
 type TuningTrial struct {
 	StudyID    string             `json:"study_id"`
@@ -34,10 +32,4 @@ type TuningTrial struct {
 	Reason     string             `json:"reason"`
 	ResultHash string             `json:"result_hash"`
 	Delivered  bool               `json:"delivered"`
-}
-type TuningValidation struct {
-	BaselineRun  string `json:"baseline_run"`
-	CandidateRun string `json:"candidate_run"`
-	InputDir     string `json:"input_dir"`
-	Error        string `json:"error"`
 }

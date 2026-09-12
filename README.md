@@ -44,12 +44,11 @@ constexpr double START_TEMP = 100.0;  // @tune 1 1000 log
 
 GUIの「チューニング」でソースと入力セットを選び、「パラメータを検出」から探索範囲を確認して開始します。現在値を評価した後、指定した回数だけ追加候補を試します。各候補はソースのコピーの初期値だけを変更して再コンパイルします。元ファイルは変更しません。
 
-探索・検証用の入力セットは、`ahc-plaza/inputs/`直下のフォルダーから選択します（例：`ahc-plaza/inputs/train/0000.txt`）。通常Runの`default_input_dir`設定とは独立しています。追加したセットは「入力セットを再読込」で一覧へ反映できます。
+探索用の入力セットは、`ahc-plaza/inputs/`直下のフォルダーから選択します（例：`ahc-plaza/inputs/train/0000.txt`）。通常Runの`default_input_dir`設定とは独立しています。追加したセットは「入力セットを再読込」で一覧へ反映できます。
 
 - 目的値は固定ケースの**生スコア平均**です。最大化・最小化はプロジェクト設定に従います。
 - WA・TLE・コンパイル失敗・結果の欠落は失敗Trialとし、最良値の計算に含めません。5回連続失敗で探索を停止します。
 - 最良候補には現在値も含みます。「値を入れたC++を保存」で単独のC++を取得できます。
-- 探索に使っていない入力セットで、現在値と候補を比較できます。検証はOptunaへ戻しません。
 - 「候補の終了後に一時停止」と「今すぐ停止」を選べます。ブラウザを閉じてもサーバーが動いていれば継続します。
 - 再開は保存した原本・入力・設定を使います。元ソースを編集しても探索に混入しません。探索範囲やソースを変える場合は新しいStudyを開始してください。
 - TrialのRunは通常履歴から除外されます。「チューニングを含む」で表示できます。通常Runとチューニングの重い評価は同一プロジェクト内で直列に実行します。
@@ -93,10 +92,9 @@ ahc-plaza doctor --tuning
 ahc-plaza tune --solver solver/main.cpp --input-dir ahc-plaza/inputs/train --trials 100
 ahc-plaza tune resume --study <study-id> --additional-trials 100
 ahc-plaza tune export --study <study-id> --best
-ahc-plaza tune validate --study <study-id> --input-dir ahc-plaza/inputs/validation --threads 1
 ```
 
-GUIとCLIの同時所有はプロジェクトロックで防ぎます。CLIを使う際は同じプロジェクトのGUIを終了してください。時間予算は`--seconds`で指定でき、実行中の候補の終了まで待ちます。Optunaのseedはsolver内部の乱数やOS負荷による変動まで固定するものではありません。
+GUIとCLIの同時所有はプロジェクトロックで防ぎます。CLIを使う際は同じプロジェクトのGUIを終了してください。Optunaのseedはsolver内部の乱数やOS負荷による変動まで固定するものではありません。
 
 ## インストール
 
@@ -210,7 +208,7 @@ go test -tags tuning_bundle ./internal/tuning/...
 python3 scripts/tuning/smoke.py --binary ./ahc-plaza --trials 100
 ```
 
-後者にはg++とpahcerが必要です。一時プロジェクトでシステムPythonのないPATH、実Optuna、停止・強制終了・再開、固定条件、書き出し、別入力検証を確認します。amd64/arm64の同梱workerテストはCIにも定義しています。
+後者にはg++とpahcerが必要です。一時プロジェクトでシステムPythonのないPATH、実Optuna、停止・強制終了・再開、固定条件、書き出しを確認します。amd64/arm64の同梱workerテストはCIにも定義しています。
 
 容量の実測、工程別ベンチマーク、確認した環境と未確認の範囲は[実装の検証記録](docs/optuna-verification.md)を参照してください。
 

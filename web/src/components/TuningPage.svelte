@@ -8,10 +8,10 @@
   export let onOpenRun: (id: string) => void = () => {}
   export let onCompare: (a: string, b: string) => void = () => {}
 
-  let solver = '', inputDir = '', trials = 100, threads = 0, timeoutMS = 0, seconds = 0, seed = 42
+  let solver = '', inputDir = '', trials = 100, threads = 0, timeoutMS = 0, seed = 42
   let scan: TuneScan | null = null, parameters: TuneParameter[] = [], environment: TuneEnvironment | null = null
   let studies: TuneStudy[] = [], detail: TuneDetail | null = null, rows: TuneTrial[] = [], history: TuneTrial[] = []
-  let message = '', busy = false, page = 0, additional = 0, validationInput = '', validationThreads = 1
+  let message = '', busy = false, page = 0, additional = 0
   let events: EventSource | null = null, refreshing = false, lastRevision = '', destroyed = false
   let selectedTrial: number | null = null
   let selectedStudyID = ""
@@ -47,14 +47,13 @@
       inputDirectories = response.input_directories
       countInput = ''
       if (!inputDirectories.includes(inputDir)) inputDir = inputDirectories[0] ?? ''
-      if (!inputDirectories.includes(validationInput)) validationInput = ''
     } finally { inputsLoading = false }
   }
   async function loadStudies() { studies = await requestJSON<TuneStudy[]>('/api/tuning/studies') }
   async function detect() { await action(async () => { const response = await post<{ scan: TuneScan; profile: TuneParameter[] | null; previous_profile: { parameters: TuneParameter[] } | null }>('scan', { solver }); scan = response.scan; previousParameters=response.previous_profile?.parameters ?? []; parameters = structuredClone(response.profile ?? scan.parameters); message = response.profile ? 'このソースと一致する保存プロファイルを適用しました。' : 'コメントから検出しました。探索範囲を確認してください。' }) }
   async function setup() { await action(async () => { environment = await post<TuneEnvironment>('environment/setup'); message = '専用環境の準備ができました。' }) }
   async function saveProfile() { await action(async () => { parameters = await requestJSON<TuneParameter[]>('/api/tuning/profiles', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ solver, hash: scan?.hash, parameters }) }); message = 'このソース用の探索設定を保存しました。' }) }
-  async function start() { await action(async () => { const s = await post<TuneStudy>('studies', { solver, input_dir: inputDir, source_hash: scan?.hash, parameters, trials, threads, timeout_ms: timeoutMS, seconds, seed }); await loadStudies(); await selectStudy(s.id) }) }
+  async function start() { await action(async () => { const s = await post<TuneStudy>('studies', { solver, input_dir: inputDir, source_hash: scan?.hash, parameters, trials, threads, timeout_ms: timeoutMS, seed }); await loadStudies(); await selectStudy(s.id) }) }
   async function refresh(id: string) {
     if (refreshing || destroyed) return; refreshing = true
     try {
@@ -78,7 +77,6 @@
   async function stop(immediate: boolean) { if (!detail) return; await action(async () => { await post(`studies/${detail!.study.id}/${immediate ? 'cancel' : 'pause'}`); message = immediate ? '評価を中断しています。' : '現在の候補の評価後に停止します。' }) }
   async function resume() { if (!detail) return; await action(async () => { await post(`studies/${detail!.study.id}/resume`, { additional_trials: additional }); additional = 0; await refresh(detail!.study.id) }) }
   async function exportSource() { if (!detail) return; await action(async () => { const result = await post<{ path: string; source: string }>(`studies/${detail!.study.id}/export`, { number: selectedTrial }); const url = URL.createObjectURL(new Blob([result.source], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = result.path.split('/').pop() ?? 'main.best.cpp'; a.click(); URL.revokeObjectURL(url); message = `保存しました: ${result.path}` }) }
-  async function validate() { if (!detail) return; await action(async () => { await post(`studies/${detail!.study.id}/validate`, { input_dir: validationInput, number: selectedTrial, threads: validationThreads }); message = '別入力で現在値と候補を評価しています。'; await refresh(detail!.study.id) }) }
   onMount(() => { void Promise.all([loadStudies(), loadInputDirectories(), requestJSON<TuneEnvironment>('/api/tuning/environment').then(v => environment = v)]).catch(e => message = errorMessage(e)); return () => { destroyed = true; events?.close() } })
 </script>
 
@@ -119,7 +117,7 @@
       <details><summary>検出したソース</summary><pre>{#each scan.source.split('\n') as line, i}<span id={`tune-source-${i + 1}`} class:annotated={parameters.some(p => p.line === i + 1)}>{i + 1}  {line}{'\n'}</span>{/each}</pre></details>
     {/if}
     <div class="fields"><label>追加候補の試行回数<input type="number" min="1" max="10000" bind:value={trials} /></label><p>目的値：生スコア平均（{objective === 'min' ? '最小化' : '最大化'}）</p></div>
-    <details><summary>詳細設定</summary><div class="fields"><label>ケース並列数（0＝自動）<input type="number" min="0" max="256" bind:value={threads} /></label><label>タイムアウト ms（0＝設定値）<input type="number" min="0" bind:value={timeoutMS} /></label><label>時間予算 秒（0＝制限なし）<input type="number" min="0" bind:value={seconds} /></label><label>Optuna seed<input type="number" min="0" bind:value={seed} /></label></div><p>時間予算は次の候補の開始を制限します。実行中の候補は終了まで待ちます。</p></details>
+    <details><summary>詳細設定</summary><div class="fields"><label>ケース並列数（0＝自動）<input type="number" min="0" max="256" bind:value={threads} /></label><label>タイムアウト ms（0＝設定値）<input type="number" min="0" bind:value={timeoutMS} /></label><label>Optuna seed<input type="number" min="0" bind:value={seed} /></label></div></details>
     <p>{trials || 0}候補 × {caseCount ?? "—"}ケース、加えて現在値{caseCount ?? "—"}ケースを評価します。失敗候補も回数に含みます。候補ごとに再コンパイルします。</p>
     <button class="primary" disabled={busy || active || incomplete || !environment?.available || !inputDir || !trials || caseCount === 0} onclick={start}>{busy ? '準備中…' : 'チューニングを開始'}</button>
   </section>
@@ -137,13 +135,10 @@
       <div class="metrics"><div>現在値<strong>{number(detail.study.baseline_value)}</strong></div><div>{detail.study.best_run === detail.study.baseline_run ? '現在値が最良' : '最良値'}<strong>{number(detail.study.best_value)}</strong></div><div>現在値との差<strong>{baseline !== null && detail.study.best_value !== null ? number(detail.study.best_value - baseline) : '—'}</strong></div></div>
       <div class="actions">{#if active}<button disabled={busy} onclick={() => stop(false)}>候補の終了後に一時停止</button><button disabled={busy} onclick={() => stop(true)}>今すぐ停止</button>{:else}<label>追加試行数<input type="number" min="0" max="10000" bind:value={additional} /></label><button disabled={busy} onclick={resume}>保存したソースで再開</button>{/if}</div>
       {#if chartPoints.length}<figure><svg viewBox="0 0 780 190" role="img" aria-label="候補の目的値と最良値の推移"><line x1="35" y1="155" x2="745" y2="155" stroke="currentColor" opacity=".25" /><text x="35" y="16">{number(hi)}</text><text x="35" y="180">{number(lo)}</text><polyline points={bestLine} fill="none" stroke="var(--selection, #586f55)" stroke-width="2" />{#each chartPoints as p}<circle cx={p.x} cy={p.y} r="3" fill="currentColor"><title>Trial {p.trial.number}: {p.trial.value}</title></circle>{/each}</svg><figcaption>点：各候補の生スコア平均 ／ 線：それまでの最良値。失敗は数値に含めません。</figcaption></figure>{/if}
-      <div class="table-scroll"><table><thead><tr><th>Trial</th><th>状態</th><th>目的値</th><th>パラメータ</th><th>Run・失敗理由</th></tr></thead><tbody>{#each rows as t}<tr><td>{t.number}</td><td>{states[t.status] ?? t.status}</td><td>{number(t.value)}</td><td><code>{JSON.stringify(t.params)}</code></td><td><div class="trial-actions">{#if t.run_id}<button class="link" onclick={() => onOpenRun(t.run_id)}>Runの詳細</button>{/if}{#if t.status === 'COMPLETE'}<button onclick={() => selectedTrial = t.number}>この候補を選択</button>{/if}</div>{#if t.reason}<p class="trial-reason">{t.reason}</p>{/if}</td></tr>{/each}</tbody></table></div>
+      <div class="table-scroll"><table><thead><tr><th>Trial</th><th>状態</th><th>目的値</th><th>パラメータ</th><th>Run・失敗理由</th></tr></thead><tbody>{#each rows as t}<tr><td>{t.number}</td><td>{states[t.status] ?? t.status}</td><td>{number(t.value)}</td><td><code>{JSON.stringify(t.params)}</code></td><td><div class="trial-actions">{#if t.run_id}<button class="link" onclick={() => onOpenRun(t.run_id)}>Runの詳細</button>{/if}{#if t.status === 'COMPLETE'}<button onclick={() => selectedTrial = t.number}>保存対象にする</button>{/if}</div>{#if t.reason}<p class="trial-reason">{t.reason}</p>{/if}</td></tr>{/each}</tbody></table></div>
       <div class="actions"><button disabled={page === 0 || refreshing} onclick={() => { page--; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>前へ</button><span>{page + 1}ページ</span><button disabled={rows.length < 50 || refreshing} onclick={() => { page++; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>次へ</button></div>
       <p>選択中：{selectedTrial === null ? '現在値を含めた最良候補' : `Trial ${selectedTrial}`}</p>
       <div class="actions"><button onclick={() => selectedTrial = null}>最良候補に戻す</button><button disabled={busy || detail.study.best_value === null} onclick={exportSource}>値を入れたC++を保存</button><button disabled={!detail.study.best_run} onclick={() => onCompare(detail!.study.baseline_run, detail!.study.best_run)}>現在値と最良候補を比較</button></div>
-      <h3>別入力セットで検証</h3><p>探索に使っていないケースで、現在値と選択した候補を比較します。検証結果はOptunaへ戻しません。</p>
-      <div class="fields"><label>検証用入力<select aria-label="検証用入力" bind:value={validationInput}><option value="">選択してください</option>{#each inputDirectories as path}<option value={path}>{path}</option>{/each}</select></label><label>ケース並列数<input type="number" min="1" max="256" bind:value={validationThreads} /></label><button disabled={busy || active || !validationInput || detail.study.best_value === null} onclick={validate}>現在値と候補を検証</button></div>
-      {#each detail.study.validations ?? [] as v}<p>{v.input_dir} {#if v.error}<span>{v.error}</span>{:else}<button class="link" onclick={() => onCompare(v.baseline_run, v.candidate_run)}>検証結果を比較</button>{/if}</p>{/each}
     </section>
   {/if}
 </div>
@@ -151,7 +146,7 @@
 <style>
   .tuning { max-width: 1180px; margin: 0 auto; display: grid; gap: 24px; }
   section, .environment { border: 1px solid var(--rule); padding: 22px; background: var(--paper); }
-  h2 { margin: 0 0 12px; font-size: 18px; } h3 { margin-top: 24px; font-size: 15px; }
+  h2 { margin: 0 0 12px; font-size: 18px; }
   p { color: var(--pencil); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
   label { display: grid; gap: 7px; font-size: 12px; min-width: 0; }
   input:not([type=checkbox]), select { padding: 8px; border: 1px solid var(--rule); background: var(--paper); color: var(--graphite); min-width: 0; width: 100%; box-sizing: border-box; }

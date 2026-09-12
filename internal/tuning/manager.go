@@ -33,7 +33,6 @@ type StartRequest struct {
 	Trials     int                `json:"trials"`
 	Threads    int                `json:"threads"`
 	TimeoutMS  int                `json:"timeout_ms"`
-	Seconds    int                `json:"seconds"`
 	Seed       int                `json:"seed"`
 }
 type Manifest struct {
@@ -131,8 +130,8 @@ func (m *Manager) Start(ctx context.Context, r StartRequest) (domain.TuningStudy
 	m.operationMu.Lock()
 	defer m.operationMu.Unlock()
 	s := domain.TuningStudy{}
-	if r.Trials < 1 || r.Trials > 10000 || r.Seconds < 0 || r.Seconds > 7*24*3600 || r.Threads < 0 || r.Threads > 256 || r.TimeoutMS < 0 || r.Seed < 0 || uint64(r.Seed) > 4294967295 {
-		return s, fmt.Errorf("試行数(1〜10000)・時間・並列数・seedを確認してください")
+	if r.Trials < 1 || r.Trials > 10000 || r.Threads < 0 || r.Threads > 256 || r.TimeoutMS < 0 || r.Seed < 0 || uint64(r.Seed) > 4294967295 {
+		return s, fmt.Errorf("試行数(1〜10000)・並列数・タイムアウト・seedを確認してください")
 	}
 	m.mu.Lock()
 	unavailable := m.closed || len(m.active) > 0
@@ -208,7 +207,7 @@ func (m *Manager) Start(ctx context.Context, r StartRequest) (domain.TuningStudy
 	if e != nil {
 		return s, e
 	}
-	s = domain.TuningStudy{ID: id, Status: "preparing", Trials: r.Trials, Seconds: r.Seconds, ManifestHash: params.Hash(b), BaselineRun: baseline, CreatedAt: time.Now().UTC(), Validations: []domain.TuningValidation{}}
+	s = domain.TuningStudy{ID: id, Status: "preparing", Trials: r.Trials, ManifestHash: params.Hash(b), BaselineRun: baseline, CreatedAt: time.Now().UTC()}
 	if e = m.save(&s); e != nil {
 		return s, e
 	}
@@ -473,10 +472,6 @@ func (m *Manager) run(ctx context.Context, a *activity, s *domain.TuningStudy, v
 			return
 		}
 		s.Elapsed = before + time.Since(start).Seconds()
-		if s.Seconds > 0 && s.Elapsed >= float64(s.Seconds) {
-			s.Status = "completed"
-			return
-		}
 		if consecutive >= 5 {
 			fail(fmt.Errorf("5回連続で候補が失敗しました。ログと探索範囲を確認してください"))
 			return

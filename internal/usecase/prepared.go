@@ -124,15 +124,6 @@ func SnapshotTuningProject(ctx context.Context, root, destination string, limits
 }
 
 func PrepareTuningInputs(ctx context.Context, request RunRequest, destination string) (PreparedRun, error) {
-	return prepareTuningInputs(ctx, request, destination, true)
-}
-
-// PrepareTuningValidationInputs は検証用入力だけを固定します。
-func PrepareTuningValidationInputs(ctx context.Context, request RunRequest, destination string) (PreparedRun, error) {
-	return prepareTuningInputs(ctx, request, destination, false)
-}
-
-func prepareTuningInputs(ctx context.Context, request RunRequest, destination string, includeBuildAssets bool) (PreparedRun, error) {
 	cfg, e := config.Load(request.ConfigPath)
 	if e != nil {
 		return PreparedRun{}, e
@@ -151,24 +142,10 @@ func prepareTuningInputs(ctx context.Context, request RunRequest, destination st
 		return p, fmt.Errorf("入力ケースがありません")
 	}
 	p.InputDir = filepath.Join(destination, "inputs")
-	if includeBuildAssets {
-		p.ToolsDir = filepath.Join(destination, "tools")
-		p.SettingFile = filepath.Join(destination, "pahcer_config.toml")
-		p.ProjectDir = filepath.Join(destination, "project")
-	}
+	p.ToolsDir = filepath.Join(destination, "tools")
+	p.SettingFile = filepath.Join(destination, "pahcer_config.toml")
+	p.ProjectDir = filepath.Join(destination, "project")
 	if e = os.MkdirAll(p.InputDir, 0755); e != nil {
-		return p, e
-	}
-	if !includeBuildAssets {
-		for _, input := range inputs {
-			if e = ctx.Err(); e != nil {
-				return p, e
-			}
-			if e = copyRegularFile(input.Path, filepath.Join(p.InputDir, filepath.Base(input.Path)), 0644); e != nil {
-				return p, e
-			}
-		}
-		p.Inputs, e = cases.Discover(p.InputDir)
 		return p, e
 	}
 	tools, e := cfg.ResolveProjectPath("tools", cfg.File.Paths.ToolsDir)

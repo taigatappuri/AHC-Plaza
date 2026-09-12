@@ -91,15 +91,6 @@ func TestInspectBuildRequiresTestSteps(t *testing.T) {
 	}
 }
 
-func TestValidationPreparedUsesStudyBuildAssets(t *testing.T) {
-	fixed := usecase.PreparedRun{ProjectDir: "fixed/project", SourceTarget: "solver/ankake.cpp", ToolsDir: "fixed/tools", SettingFile: "fixed/pahcer.toml", ConfigHash: "fixed"}
-	inputs := usecase.PreparedRun{InputDir: "validation/inputs", Inputs: []domain.InputCase{{ID: "new"}}, ProjectDir: "validation/project", SourceTarget: "main.cpp", ToolsDir: "validation/tools", SettingFile: "validation/pahcer.toml"}
-	got := validationPrepared(inputs, fixed)
-	if got.ProjectDir != fixed.ProjectDir || got.SourceTarget != fixed.SourceTarget || got.ToolsDir != fixed.ToolsDir || got.SettingFile != fixed.SettingFile || got.InputDir != inputs.InputDir || len(got.Inputs) != 1 {
-		t.Fatalf("got %#v", got)
-	}
-}
-
 func TestManifestV1CannotResume(t *testing.T) {
 	m := &Manager{}
 	if err := m.verify(context.Background(), domain.TuningStudy{}, Manifest{Version: 1}); err == nil || !strings.Contains(err.Error(), "閲覧と書き出し") {
