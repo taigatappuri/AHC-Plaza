@@ -102,14 +102,13 @@
 
   <section>
     <h2>新しいチューニング</h2>
-    <p>定数に <code>// @tune 10 200</code> を付け、探索範囲を確認して開始します。元のソースは変更しません。</p>
+    <p>チューニングしたいパラメータの行に <code>// @tune (下限値) (上限値) step=(刻み)</code> のコメントをつけてください</p>
     <div class="fields">
       <label>ソース<select aria-label="ソース" bind:value={solver} onchange={() => { scan = null; parameters = [] }}><option value="">選択してください</option>{#each solvers as path}<option value={path}>{path}</option>{/each}</select></label>
       <label>入力セット<select aria-label="入力セット" bind:value={inputDir}><option value="">選択してください</option>{#each inputDirectories as path}<option value={path}>{path}</option>{/each}</select></label>
       <button disabled={busy || inputsLoading} onclick={() => action(loadInputDirectories)}>入力セットを再読込</button>
       <button disabled={busy || !solver} onclick={detect}>パラメータを検出</button>
     </div>
-    <p>入力セットは <code>ahc-plaza/inputs/</code> 直下のフォルダーから選択します。</p>
     {#if !inputsLoading && inputDirectories.length === 0}<p>入力セットがありません。例：<code>ahc-plaza/inputs/train/0000.txt</code> を用意して再読込してください。</p>{/if}
     {#if scan}
       {#if previousParameters.length}<details open><summary>前回の保存時からソースが変更されています。以前の範囲は自動適用していません。</summary><div class="table-scroll"><table><thead><tr><th>名前</th><th>以前の宣言</th><th>現在の宣言</th><th>以前の範囲</th></tr></thead><tbody>{#each previousParameters as old}<tr><td>{old.name}</td><td>{old.type} = {old.token}</td><td>{scan.parameters.find(p=>p.name===old.name)?.token ?? '見つかりません'}</td><td>{old.low} ～ {old.high}</td></tr>{/each}</tbody></table></div></details>{/if}
@@ -123,9 +122,8 @@
       <div class="actions"><button disabled={busy || incomplete} onclick={saveProfile}>探索設定を保存</button><button onclick={() => parameters = structuredClone(scan!.parameters)}>コメントの設定に戻す</button></div>
       <details><summary>検出したソース</summary><pre>{#each scan.source.split('\n') as line, i}<span id={`tune-source-${i + 1}`} class:annotated={parameters.some(p => p.line === i + 1)}>{i + 1}  {line}{'\n'}</span>{/each}</pre></details>
     {/if}
-    <div class="fields"><label>追加候補の試行回数<input type="number" min="1" max="10000" bind:value={trials} /></label><p>目的値：生スコア平均（{objective === 'min' ? '最小化' : '最大化'}）</p></div>
-    <details><summary>詳細設定</summary><div class="fields"><label>ケース並列数（0＝自動）<input type="number" min="0" max="256" bind:value={threads} /></label><label>タイムアウト ms（0＝設定値）<input type="number" min="0" bind:value={timeoutMS} /></label><label>Optuna seed<input type="number" min="0" bind:value={seed} /></label></div></details>
-    <p>{trials || 0}候補 × {caseCount ?? "—"}ケース、加えてデフォルト値{caseCount ?? "—"}ケースを評価します。失敗候補も回数に含みます。候補ごとに再コンパイルします。</p>
+    <div class="fields"><label>試行回数<input type="number" min="1" max="10000" bind:value={trials} /></label><p>目的：{objective === 'min' ? '最小化' : '最大化'}</p></div>
+    <details><summary>詳細設定</summary><div class="fields"><label>ケース並列数（0＝自動）<input type="number" min="0" max="256" bind:value={threads} /></label><label>タイムアウト(ミリ秒)（0＝設定値）<input type="number" min="0" bind:value={timeoutMS} /></label><label>Optuna seed<input type="number" min="0" bind:value={seed} /></label></div></details>
     <button class="primary" disabled={busy || active || incomplete || !environment?.available || !inputDir || !trials || caseCount === 0} onclick={start}>{busy ? '準備中…' : 'チューニングを開始'}</button>
   </section>
 
@@ -139,13 +137,13 @@
       <p>成功 {detail.study.completed} · 失敗 {detail.study.failed} · 経過時間 {Math.round(detail.study.elapsed)}秒 · 使用容量 {mb(detail.usage_bytes)}</p>
       <p>推定残り時間：{detail.study.completed + detail.study.failed > 0 ? `${Math.ceil(detail.study.elapsed / (detail.study.completed + detail.study.failed + 1) * Math.max(0, detail.study.trials - detail.study.completed - detail.study.failed))}秒（ビルドを含む概算）` : "デフォルト値の評価後に算出"}</p>
       <p>固定条件：{detail.manifest.request.solver} / {detail.manifest.request.input_dir} / {detail.manifest.prepared.inputs.length}ケース / 並列 {detail.manifest.request.threads} / {detail.manifest.request.timeout_ms} ms</p>
-      <div class="metrics"><div>デフォルト値<strong>{number(detail.study.baseline_value)}</strong></div><div>{detail.study.best_run === detail.study.baseline_run ? 'デフォルト値が最良' : '最良値'}<strong>{number(detail.study.best_value)}</strong></div><div>デフォルト値との差<strong>{baseline !== null && detail.study.best_value !== null ? number(detail.study.best_value - baseline) : '—'}</strong></div></div>
+      <div class="metrics"><div>デフォルト値<strong>{number(detail.study.baseline_value)}</strong></div><div>{detail.study.best_run === detail.study.baseline_run ? '最良値' : '最良値'}<strong>{number(detail.study.best_value)}</strong></div><div>デフォルト値との差<strong>{baseline !== null && detail.study.best_value !== null ? number(detail.study.best_value - baseline) : '—'}</strong></div></div>
       <div class="actions">{#if active}<button disabled={busy} onclick={() => stop(false)}>候補の終了後に一時停止</button><button disabled={busy} onclick={() => stop(true)}>今すぐ停止</button>{:else}<label>追加試行数<input type="number" min="0" max="10000" bind:value={additional} /></label><button disabled={busy} onclick={resume}>保存したソースで再開</button>{/if}</div>
       {#if chartPoints.length}<figure><svg viewBox="0 0 780 190" role="img" aria-label="候補の目的値と最良値の推移"><line x1="35" y1="155" x2="745" y2="155" stroke="currentColor" opacity=".25" /><text x="35" y="16">{number(hi)}</text><text x="35" y="180">{number(lo)}</text><polyline points={bestLine} fill="none" stroke="var(--selection, #586f55)" stroke-width="2" />{#each chartPoints as p}<circle cx={p.x} cy={p.y} r="3" fill="currentColor"><title>Trial {p.trial.number}: {p.trial.value}</title></circle>{/each}</svg><figcaption>点：各候補の生スコア平均 ／ 線：それまでの最良値。失敗は数値に含めません。</figcaption></figure>{/if}
-      <div class="table-scroll"><table><thead><tr><th>Trial</th><th>状態</th><th>目的値</th><th>パラメータ</th><th>Run・失敗理由</th></tr></thead><tbody>{#each rows as t}<tr><td>{t.number}</td><td>{states[t.status] ?? t.status}</td><td>{number(t.value)}</td><td><code>{JSON.stringify(t.params)}</code></td><td><div class="trial-actions">{#if t.run_id}<button class="link" onclick={() => onOpenRun(t.run_id)}>Runの詳細</button>{/if}{#if t.status === 'COMPLETE'}<button onclick={() => selectedTrial = t.number}>保存対象にする</button>{/if}</div>{#if t.reason}<p class="trial-reason">{t.reason}</p>{/if}</td></tr>{/each}</tbody></table></div>
+      <div class="table-scroll"><table><thead><tr><th>Trial</th><th>状態</th><th>目的値</th><th>パラメータ</th><th>Run・失敗理由</th></tr></thead><tbody>{#each rows as t}<tr><td>{t.number}</td><td>{states[t.status] ?? t.status}</td><td>{number(t.value)}</td><td><code>{JSON.stringify(t.params)}</code></td><td><div class="trial-actions">{#if t.run_id}<button class="link" onclick={() => onOpenRun(t.run_id)}>Runの詳細</button>{/if}{#if t.status === 'COMPLETE'}<button onclick={() => selectedTrial = t.number}>選択</button>{/if}</div>{#if t.reason}<p class="trial-reason">{t.reason}</p>{/if}</td></tr>{/each}</tbody></table></div>
       <div class="actions"><button disabled={page === 0 || refreshing} onclick={() => { page--; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>前へ</button><span>{page + 1}ページ</span><button disabled={rows.length < 50 || refreshing} onclick={() => { page++; void refresh(detail!.study.id).catch(e => message = errorMessage(e)) }}>次へ</button></div>
       <p>選択中：{selectedTrial === null ? 'デフォルト値を含めた最良候補' : `Trial ${selectedTrial}`}</p>
-      <div class="actions"><button onclick={() => selectedTrial = null}>最良候補に戻す</button><button disabled={busy || detail.study.best_value === null} onclick={exportSource}>値を入れたC++を保存</button><button disabled={!detail.study.best_run} onclick={() => onCompare(detail!.study.baseline_run, detail!.study.best_run)}>デフォルト値と最良候補を比較</button></div>
+      <div class="actions"><button onclick={() => selectedTrial = null}>最良候補を選択</button><button disabled={busy || detail.study.best_value === null} onclick={exportSource}>値を入れたC++を保存</button><button disabled={!detail.study.best_run} onclick={() => onCompare(detail!.study.baseline_run, detail!.study.best_run)}>デフォルト値と最良候補を比較</button></div>
       <div class="actions"><button disabled={busy || active} onclick={deleteStudy}>このStudyを削除</button></div>
     </section>
   {/if}

@@ -388,7 +388,7 @@
         {#if showingRunDetail}
           <RunDetail {selectedRun} {caseResults} {runStatistics} {featureData} {source} {logs} {runError} onCancel={cancelRun} onBack={() => showingRunDetail = false} onUpdateComment={updateRunComment} onConfigureInputFormat={configureInputFormat} />
         {:else}
-          <label class="history-tuning-toggle"><input type="checkbox" bind:checked={includeTuning} onchange={refreshRuns} /> チューニングを含む</label>
+          <label class="history-tuning-toggle"><input type="checkbox" bind:checked={includeTuning} onchange={refreshRuns} /> チューニング時の実行も含む</label>
           <RunTable bind:query={runQuery} {runs} selectedRunId={selectedRun?.id ?? ''} onSelect={openRunDetail} />
         {/if}
       {:else if activeTab === 'compare'}
