@@ -84,6 +84,9 @@ export type ConfigData = {
     confidence_level: number
     bootstrap_iterations: number
   }
+  tuning: {
+    source_target: string
+  }
   input_format: {
     variables: InputVariable[]
     features: InputFeatureConfig[]

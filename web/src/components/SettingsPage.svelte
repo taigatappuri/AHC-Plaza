@@ -138,6 +138,15 @@
     </section>
 
     <section class="settings-section">
+      <div class="settings-section-heading"><h3>チューニング</h3><p>空欄の場合はビルド設定から推定</p></div>
+      <div class="settings-section-body">
+        <div class="form-grid">
+          <label>調整対象ソース<input bind:value={form.tuning.source_target} class:invalid={validationErrors['tuning.source_target']} placeholder="例: main.cpp" /></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
       <div class="settings-section-heading"><h3>スコアと統計</h3><p></p></div>
       <div class="settings-section-body">
         <div class="form-grid">
