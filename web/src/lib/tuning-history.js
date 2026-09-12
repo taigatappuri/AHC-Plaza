@@ -14,3 +14,8 @@ export function trialHistoryOffset(historyLength, total) {
   if (historyLength > total) return 0
   return historyLength > 0 ? historyLength - 1 : 0
 }
+
+/** @param {number} offset @param {number} total */
+export function trialHistoryLimit(offset, total) {
+  return Math.min(100, Math.max(0, total - offset))
+}

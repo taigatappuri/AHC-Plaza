@@ -187,6 +187,7 @@ func (m *Manager) Export(ctx context.Context, id string, number *int) (Export, e
 type usageSample struct {
 	at    time.Time
 	bytes int64
+	runs  map[string]bool
 }
 
 func (m *Manager) Usage(id string) int64 {
@@ -234,7 +235,13 @@ func (m *Manager) Usage(id string) int64 {
 	if m.usageCache == nil {
 		m.usageCache = map[string]usageSample{}
 	}
-	m.usageCache[id] = usageSample{time.Now(), total}
+	includedRuns := make(map[string]bool, len(ids))
+	for _, runID := range ids {
+		if runID != "" {
+			includedRuns[runID] = true
+		}
+	}
+	m.usageCache[id] = usageSample{at: time.Now(), bytes: total, runs: includedRuns}
 	m.mu.Unlock()
 	return total
 }

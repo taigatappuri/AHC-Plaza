@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -78,7 +79,7 @@ type Manager struct {
 
 func NewManager(root, configPath, version string, database *store.SQLiteStore) (*Manager, error) {
 	m := &Manager{Root: root, ConfigPath: configPath, Version: version, Store: database, active: map[string]*activity{}}
-	if e := cleanupDeletionTrash(root); e != nil {
+	if e := cleanupDeletionTrash(root, database); e != nil {
 		fmt.Fprintln(os.Stderr, "tuning deletion cleanup:", e)
 	}
 	studies, e := database.ListStudies(context.Background())
@@ -97,7 +98,9 @@ func NewManager(root, configPath, version string, database *store.SQLiteStore) (
 	return m, nil
 }
 
-func cleanupDeletionTrash(root string) error {
+var deletionTrashName = regexp.MustCompile(`^(.+)\.deleting-[0-9]{8}-[0-9]{6}\.[0-9]{9}-[0-9a-f]{8}$`)
+
+func cleanupDeletionTrash(root string, database *store.SQLiteStore) error {
 	dataRoot := filepath.Join(root, "ahc-plaza")
 	if info, e := os.Lstat(dataRoot); e == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
 		return fmt.Errorf("削除待ち領域の親が通常のディレクトリではありません: %s", dataRoot)
@@ -120,10 +123,34 @@ func cleanupDeletionTrash(root string) error {
 			return e
 		}
 		for _, entry := range entries {
-			if strings.Contains(entry.Name(), ".deleting-") {
-				if e := os.RemoveAll(filepath.Join(parent, entry.Name())); e != nil {
+			match := deletionTrashName.FindStringSubmatch(entry.Name())
+			if match == nil {
+				continue
+			}
+			original := filepath.Join(parent, match[1])
+			trash := filepath.Join(parent, entry.Name())
+			var rowErr error
+			if filepath.Base(parent) == "tuning" {
+				_, rowErr = database.GetStudy(context.Background(), match[1])
+			} else {
+				_, rowErr = database.GetRun(context.Background(), match[1])
+			}
+			if rowErr == nil {
+				if _, e := os.Lstat(original); e == nil {
+					return fmt.Errorf("削除待ち領域を復元できません。元パスが存在します: %s", original)
+				} else if !os.IsNotExist(e) {
 					return e
 				}
+				if e := os.Rename(trash, original); e != nil {
+					return e
+				}
+				continue
+			}
+			if !errors.Is(rowErr, sql.ErrNoRows) {
+				return rowErr
+			}
+			if e := os.RemoveAll(trash); e != nil {
+				return e
 			}
 		}
 	}
@@ -749,7 +776,15 @@ func (m *Manager) cleanupTuningRunCache(studyID, runID string) error {
 	}
 	m.runUsageCache[runID] = bytes
 	if sample, ok := m.usageCache[studyID]; ok {
-		sample.bytes += bytes - before
+		if sample.runs[runID] {
+			sample.bytes += bytes - before
+		} else {
+			sample.bytes += bytes
+			if sample.runs == nil {
+				sample.runs = map[string]bool{}
+			}
+			sample.runs[runID] = true
+		}
 		m.usageCache[studyID] = sample
 	}
 	m.mu.Unlock()

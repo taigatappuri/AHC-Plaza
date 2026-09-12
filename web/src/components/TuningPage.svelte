@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { errorMessage, requestJSON } from '../lib/api'
-  import { mergeTrialHistory, trialHistoryOffset } from '../lib/tuning-history.js'
+  import { mergeTrialHistory, trialHistoryLimit, trialHistoryOffset } from '../lib/tuning-history.js'
   import type { TuneParameter, TuneScan, TuneStudy, TuneTrial, TuneEnvironment, TuneDetail } from '../lib/tuning'
   export let solvers: string[] = []
   let inputDirectories: string[] = [], inputsLoading = false
@@ -67,7 +67,7 @@
       const count = detail.study.completed + detail.study.failed
       if (history.length > count) history = []
       for (let offset = trialHistoryOffset(history.length, count); offset < count;) {
-        const incomingTrials = await requestJSON<TuneTrial[]>(`/api/tuning/studies/${id}/trials?offset=${offset}&limit=100`)
+        const incomingTrials = await requestJSON<TuneTrial[]>(`/api/tuning/studies/${id}/trials?offset=${offset}&limit=${trialHistoryLimit(offset, count)}`)
         if (id !== selectedStudyID || destroyed || incomingTrials.length === 0) break
         history = mergeTrialHistory(history, incomingTrials, offset)
         offset += incomingTrials.length

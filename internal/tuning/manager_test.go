@@ -159,7 +159,7 @@ func TestCleanupTuningRunCacheRemovesBuildCopiesAndUpdatesUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := directorySize(filepath.Join(root, "ahc-plaza", "runs", "run-1"))
-	m := &Manager{Root: root, usageCache: map[string]usageSample{"study-1": {at: time.Now(), bytes: before + 100}}}
+	m := &Manager{Root: root, usageCache: map[string]usageSample{"study-1": {at: time.Now(), bytes: before + 100, runs: map[string]bool{"run-1": true}}}}
 	if err := m.cleanupTuningRunCache("study-1", "run-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -181,17 +181,120 @@ func TestCleanupTuningRunCacheRemovesBuildCopiesAndUpdatesUsage(t *testing.T) {
 	}
 }
 
-func TestCleanupDeletionTrashAfterRestart(t *testing.T) {
+func TestCleanupTuningRunCacheAccountsForWhetherRunWasAlreadyMeasured(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		withSample bool
+		includes   bool
+	}{
+		{"cached before Run started", true, false},
+		{"measured while Run was running", true, true},
+		{"no Study cache", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			runDir := filepath.Join(root, "ahc-plaza", "runs", "run-1")
+			target := filepath.Join(runDir, "workspace", "tools", "target")
+			for _, path := range []string{target, filepath.Join(runDir, "workspace", "tools", "out")} {
+				if err := os.MkdirAll(path, 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(target, "large"), make([]byte, 4096), 0644); err != nil {
+				t.Fatal(err)
+			}
+			before := directorySize(runDir)
+			m := &Manager{Root: root}
+			if tc.withSample {
+				runs := map[string]bool{}
+				bytes := int64(100)
+				if tc.includes {
+					runs["run-1"] = true
+					bytes += before
+				}
+				m.usageCache = map[string]usageSample{"study": {at: time.Now(), bytes: bytes, runs: runs}}
+			}
+			if err := m.cleanupTuningRunCache("study", "run-1"); err != nil {
+				t.Fatal(err)
+			}
+			after := directorySize(runDir)
+			if tc.withSample {
+				if got := m.usageCache["study"].bytes; got != 100+after {
+					t.Fatalf("usage = %d, want %d", got, 100+after)
+				}
+			} else if _, ok := m.usageCache["study"]; ok {
+				t.Fatal("cleanup unexpectedly created a Study usage sample")
+			}
+		})
+	}
+}
+
+func TestCleanupDeletionTrashRestoresBeforeCommitAndRemovesAfterCommit(t *testing.T) {
 	root := t.TempDir()
-	trash := filepath.Join(root, "ahc-plaza", "runs", "run.deleting-token")
-	if err := os.MkdirAll(trash, 0755); err != nil {
+	database, err := store.OpenSQLite(filepath.Join(root, "ahc-plaza", "test.db"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cleanupDeletionTrash(root); err != nil {
+	defer database.Close()
+	if err := database.SaveStudy(context.Background(), domain.TuningStudy{ID: "study"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(trash); !os.IsNotExist(err) {
-		t.Fatalf("deletion trash remains: %v", err)
+	if err := database.SaveRun(context.Background(), domain.Run{ID: "run", TuningStudy: "study", Status: domain.RunSucceeded, CreatedAt: time.Now(), StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	suffix := ".deleting-20260913-010203.123456789-abcdef12"
+	originals := []string{filepath.Join(root, "ahc-plaza", "tuning", "study"), filepath.Join(root, "ahc-plaza", "runs", "run")}
+	for _, original := range originals {
+		if err := os.MkdirAll(original+suffix, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cleanupDeletionTrash(root, database); err != nil {
+		t.Fatal(err)
+	}
+	for _, original := range originals {
+		if _, err := os.Stat(original); err != nil {
+			t.Fatalf("pre-commit trash was not restored: %v", err)
+		}
+		if err := os.Rename(original, original+suffix); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := database.DeleteTuningStudy(context.Background(), "study"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupDeletionTrash(root, database); err != nil {
+		t.Fatal(err)
+	}
+	for _, original := range originals {
+		if _, err := os.Stat(original + suffix); !os.IsNotExist(err) {
+			t.Fatalf("post-commit trash remains: %v", err)
+		}
+	}
+}
+
+func TestCleanupDeletionTrashPreservesCollision(t *testing.T) {
+	root := t.TempDir()
+	database, err := store.OpenSQLite(filepath.Join(root, "ahc-plaza", "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.SaveStudy(context.Background(), domain.TuningStudy{ID: "study"}); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(root, "ahc-plaza", "tuning", "study")
+	trash := original + ".deleting-20260913-010203.123456789-abcdef12"
+	for _, path := range []string{original, trash} {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cleanupDeletionTrash(root, database); err == nil {
+		t.Fatal("restore collision was accepted")
+	}
+	if _, err := os.Stat(trash); err != nil {
+		t.Fatalf("colliding trash was removed: %v", err)
 	}
 }
 
